@@ -4,7 +4,9 @@
 #include <algorithm>
 
 #include <tf2/LinearMath/Quaternion.h>
+#include <tf2/LinearMath/Matrix3x3.h>
 #include <tf2_ros/transform_broadcaster.h>
+#include <tf2_ros/transform_listener.h>
 #include <geometry_msgs/TransformStamped.h>
 #include <ros/ros.h>
 #include <std_msgs/String.h>
@@ -67,7 +69,7 @@ class CircularArray {
 class OculusHeadController {
 
   public:
-    explicit OculusHeadController(ros::NodeHandle& n) : nh_(n) {
+    explicit OculusHeadController(ros::NodeHandle& n) : nh_(n), tfListener_(tfBuffer_) {
       int device_idx = 0;
       
       if (init_hmd(device_idx) != 0) {
@@ -77,6 +79,9 @@ class OculusHeadController {
 
       // Topic names.
       const std::string kPepperPoseTopic = "/pepper_robot/pose/joint_angles";
+      kFixedFrame = "odom";
+      kHMDFrame = "oculus";
+      kBaseLinkFrame = "base_footprint";
 
       // Publishers and subscribers.
       pose_pub_ = nh_.advertise<naoqi_bridge_msgs::JointAnglesWithSpeed>(kPepperPoseTopic, 1);
@@ -88,6 +93,7 @@ class OculusHeadController {
 
       // Timer callbacks
       pose_timer_ = nh_.createTimer(ros::Duration(0.01), &OculusHeadController::timerCallback, this);
+      get_tf_timer_ = nh_.createTimer(ros::Duration(0.01), &OculusHeadController::gettfCallback, this);
 
     }
     ~OculusHeadController() {}
@@ -184,7 +190,15 @@ class OculusHeadController {
       return 0;
     }
 
-    /// \brief receives joystick messages
+    void gettfCallback(const ros::TimerEvent& e) {
+      try{
+        pepper_in_world_ = tfBuffer_.lookupTransform(kFixedFrame, kBaseLinkFrame, ros::Time(0));
+      }
+      catch (tf2::TransformException &ex) {
+        ROS_WARN("%s",ex.what());
+      }
+    }
+
     void timerCallback(const ros::TimerEvent& e) {
 
       ohmd_ctx_update(ctx_);
@@ -208,28 +222,74 @@ class OculusHeadController {
       f[3]
       );
 
+
+      tf2::Quaternion qtilt;
+      qtilt.setRPY(3.14159/2., 0.0, 0.0);
+
+
       // Rotate the previous pose by 90 about X
       // Then 90 about Z
       tf2::Quaternion qrotx;
       tf2::Quaternion qrotz;
-      qrotx.setRPY(3.14159/2., 0.0, 0.0);
+      qrotx.setRPY(-3.14159/2., 0.0, 0.0);
       qrotz.setRPY(0.0, 0.0, 3.14159/2.);
-      q = q * qrotx * qrotz;
-
+      // This is the same as creating a world to qtilt tf with qtilt as rot, (rotates the actual oculus frame)
+      // then a qtilt to oculus tf with q * qrotx * qrotz as tf (rotates the axes around the oculus)
+      q = qtilt * q * qrotx * qrotz;
 
       geometry_msgs::TransformStamped transformStamped;
       transformStamped.header.stamp = ros::Time::now();
-      transformStamped.header.frame_id = "world";
-      transformStamped.child_frame_id = "oculus";
+      transformStamped.header.frame_id = kFixedFrame;
+      transformStamped.child_frame_id = kHMDFrame;
       transformStamped.transform.translation.x = 0.0;
       transformStamped.transform.translation.y = 0.0;
-      transformStamped.transform.translation.z = 0.0;
+      transformStamped.transform.translation.z = 1.0;
       transformStamped.transform.rotation.x = q.x();
       transformStamped.transform.rotation.y = q.y();
       transformStamped.transform.rotation.z = q.z();
       transformStamped.transform.rotation.w = q.w();
-
       br_.sendTransform(transformStamped);
+
+      // oculus pose as euler angles in world frame
+      double oculus_roll, oculus_pitch, oculus_yaw;
+      tf2::Matrix3x3(q).getRPY(oculus_roll, oculus_pitch, oculus_yaw);
+
+      // pepper yaw in world frame (a.k.a oculus in base_footprint tf - rot only)
+      double pepper_roll, pepper_pitch, pepper_yaw;
+      tf2::Quaternion qpepper_in_world(
+          pepper_in_world_.transform.rotation.x,
+          pepper_in_world_.transform.rotation.y,
+          pepper_in_world_.transform.rotation.z,
+          pepper_in_world_.transform.rotation.w);
+      tf2::Matrix3x3(qpepper_in_world).getRPY(pepper_roll, pepper_pitch, pepper_yaw);
+      // we only care about yaw (assume base_footprint is horizontal)
+      // TODO: check that base_footprint and world z axis are aligned?
+      double relative_yaw = oculus_yaw - pepper_yaw;
+
+      // Control pepper head to oculus pose
+      // Pepper head has no roll axis, use hip?
+      // how do we track pepper's head direction?
+      const static float kMaxHeadMoveAngleRad = 1.;
+      const static float kMaxJointSpeedRadPerS = 0.2;
+      const static float kMinHeadYawRad = -2.0857;
+      const static float kMaxHeadYawRad =  2.0857;
+      const static float kMinHeadPitchRad = -0.7068;
+      const static float kMaxHeadPitchRad =  0.6371;
+      const static std::string kHeadYawJointName = "HeadYaw";
+      const static std::string kHeadPitchJointName = "HeadPitch";
+      const static ros::Duration kMaxPosePubRate(0.1);
+      // Limit the maximum rate publishing rate for pose control
+      if ( ( ros::Time::now() - pose_pub_last_publish_time_ ) > kMaxPosePubRate )
+      {
+        naoqi_bridge_msgs::JointAnglesWithSpeed joint_angles_msg;
+        joint_angles_msg.speed = kMaxJointSpeedRadPerS * 0.5;
+        joint_angles_msg.joint_names.push_back(kHeadYawJointName);
+        joint_angles_msg.joint_angles.push_back(relative_yaw);
+        joint_angles_msg.joint_names.push_back(kHeadPitchJointName);
+        joint_angles_msg.joint_angles.push_back(oculus_pitch);
+        pose_pub_.publish(joint_angles_msg);
+        pose_pub_last_publish_time_ = ros::Time::now();
+      }
 
       // read controls
       if (hmd_control_count_) {
@@ -247,55 +307,20 @@ class OculusHeadController {
 //       ohmd_sleep(.01);
     }
 
-    /*
-    {
-      // Hardware constants.
-      // Pepper.
-      const static float kMaxHeadMoveAngleRad = 1.;
-      const static float kMaxJointSpeedRadPerS = 0.2;
-      const static float kMinHeadYawRad = -2.0857;
-      const static float kMaxHeadYawRad =  2.0857;
-      const static float kMinHeadPitchRad = -0.7068;
-      const static float kMaxHeadPitchRad =  0.6371;
-      const static std::string kHeadYawJointName = "HeadYaw";
-      const static std::string kHeadPitchJointName = "HeadPitch";
-      // Rates
-      const static ros::Duration kMaxPosePubRate(0.1);
-
-      // Limit the maximum rate publishing rate for pose control
-      if ( ( ros::Time::now() - pose_pub_last_publish_time_ ) > kMaxPosePubRate )
-      {
-        // Convert right pad axes into pepper head pitch and yaw.
-        naoqi_bridge_msgs::JointAnglesWithSpeed joint_angles_msg;
-        if ( msg->buttons[kCenterHeadButton] == 1 ) {
-          joint_angles_msg.speed = kMaxJointSpeedRadPerS * 0.5;
-          joint_angles_msg.joint_names.push_back(kHeadYawJointName);
-          joint_angles_msg.joint_angles.push_back(0.);
-          joint_angles_msg.joint_names.push_back(kHeadPitchJointName);
-          joint_angles_msg.joint_angles.push_back(0.);
-          pose_pub_.publish(joint_angles_msg);
-        } else if ( msg->axes[kUDHeadAxisId] != 0 || msg->axes[kLRHeadAxisId] != 0 ) {
-          joint_angles_msg.speed = kMaxJointSpeedRadPerS * std::max(std::abs(msg->axes[kUDHeadAxisId]),
-                                                             std::abs(msg->axes[kLRHeadAxisId]));
-          joint_angles_msg.joint_names.push_back(kHeadYawJointName);
-          joint_angles_msg.joint_angles.push_back(msg->axes[kLRHeadAxisId] * kMaxHeadMoveAngleRad);
-          joint_angles_msg.joint_names.push_back(kHeadPitchJointName);
-          joint_angles_msg.joint_angles.push_back(msg->axes[kUDHeadAxisId] * kHeadUDAxisInversion
-              * kMaxHeadMoveAngleRad);
-          joint_angles_msg.relative = 1;
-          pose_pub_.publish(joint_angles_msg);
-        }
-        pose_pub_last_publish_time_ = ros::Time::now();
-      }
-    }
-    */
-
   private:
     ros::NodeHandle& nh_;
     ros::Timer pose_timer_;
+    ros::Timer get_tf_timer_;
     ros::Publisher pose_pub_;
     ros::Time pose_pub_last_publish_time_;
     tf2_ros::TransformBroadcaster br_;
+    tf2_ros::Buffer tfBuffer_;
+    tf2_ros::TransformListener tfListener_;
+    geometry_msgs::TransformStamped pepper_in_world_;
+    std::string kBaseLinkFrame;
+    std::string kFixedFrame;
+    std::string kHMDFrame;
+
     ohmd_context* ctx_;
     ohmd_device* hmd_;
     int hmd_control_count_;
