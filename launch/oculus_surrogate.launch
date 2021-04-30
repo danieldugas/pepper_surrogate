@@ -1,0 +1,14 @@
+<?xml version="1.0"?>
+<launch>
+
+  <include file="$(find realsense2_camera)/launch/rs_aligned_depth.launch" />
+  <node pkg="pepper_surrogate" type="stereo_camera_node.py" name="stero_camera_node"/>
+  <node pkg="pepper_surrogate" type="head_control_node" name="head_control_node"/>
+
+  <node type="rviz" name="rviz" pkg="rviz" args="-d $(env HOME)/.rviz/oculus_surrogate.rviz" />
+
+  <node pkg="ros_run_command" type="ros_run_command" name="eval" output="screen"
+    args="watch xrandr --output HDMI-2 --set non-desktop 0">
+  </node>
+
+</launch>
