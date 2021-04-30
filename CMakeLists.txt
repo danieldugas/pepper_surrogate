@@ -28,5 +28,8 @@ link_directories(${catkin_LIBRARY_DIRS})
 add_executable(head_control_node src/head_control_node.cpp)
 target_link_libraries(head_control_node PRIVATE ${OpenHMD_LIBRARIES} ${catkin_LIBRARIES})
 
+add_executable(simple src/simple.c)
+target_link_libraries(head_control_node PRIVATE ${OpenHMD_LIBRARIES})
+
 # Link all libraries into this one
 # target_link_libraries(${PROJECT_NAME} ${catkin_LIBRARIES} ${OpenHMD_LIBRARIES})
