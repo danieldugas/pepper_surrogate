@@ -22,6 +22,19 @@
 
 void ohmd_sleep(double);
 
+// constrains angle to [-pi, pi]
+double constrainAngle(double x){
+    x = fmod(x + M_PI,2.*M_PI);
+    if (x < 0)
+        x += 2.*M_PI;
+    return x - M_PI;
+}
+
+
+double clip(double n, double lower, double upper) {
+  return std::max(lower, std::min(n, upper));
+}
+
 // gets float values from the device and prints them
 void print_infof(ohmd_device* hmd, const char* name, int len, ohmd_float_value val)
 {
@@ -264,17 +277,17 @@ class OculusHeadController {
       tf2::Matrix3x3(qpepper_in_world).getRPY(pepper_roll, pepper_pitch, pepper_yaw);
       // we only care about yaw (assume base_footprint is horizontal)
       // TODO: check that base_footprint and world z axis are aligned?
-      double relative_yaw = oculus_yaw - pepper_yaw;
+      double relative_yaw = constrainAngle(oculus_yaw - pepper_yaw);
 
       // Control pepper head to oculus pose
       // Pepper head has no roll axis, use hip?
       // how do we track pepper's head direction?
       const static float kMaxHeadMoveAngleRad = 1.;
       const static float kMaxJointSpeedRadPerS = 0.2;
-      const static float kMinHeadYawRad = -2.0857;
-      const static float kMaxHeadYawRad =  2.0857;
-      const static float kMinHeadPitchRad = -0.7068;
-      const static float kMaxHeadPitchRad =  0.6371;
+      const static double kMinHeadYawRad = -2.0857;
+      const static double kMaxHeadYawRad =  2.0857;
+      const static double kMinHeadPitchRad = -0.7068;
+      const static double kMaxHeadPitchRad =  0.6371;
       const static std::string kHeadYawJointName = "HeadYaw";
       const static std::string kHeadPitchJointName = "HeadPitch";
       const static ros::Duration kMaxPosePubRate(0.1);
@@ -282,11 +295,11 @@ class OculusHeadController {
       if ( ( ros::Time::now() - pose_pub_last_publish_time_ ) > kMaxPosePubRate )
       {
         naoqi_bridge_msgs::JointAnglesWithSpeed joint_angles_msg;
-        joint_angles_msg.speed = kMaxJointSpeedRadPerS * 0.5;
+        joint_angles_msg.speed = kMaxJointSpeedRadPerS;
         joint_angles_msg.joint_names.push_back(kHeadYawJointName);
-        joint_angles_msg.joint_angles.push_back(relative_yaw);
+        joint_angles_msg.joint_angles.push_back(clip(relative_yaw, kMinHeadYawRad, kMaxHeadYawRad));
         joint_angles_msg.joint_names.push_back(kHeadPitchJointName);
-        joint_angles_msg.joint_angles.push_back(oculus_pitch);
+        joint_angles_msg.joint_angles.push_back(clip(oculus_pitch, kMinHeadPitchRad, kMaxHeadPitchRad));
         pose_pub_.publish(joint_angles_msg);
         pose_pub_last_publish_time_ = ros::Time::now();
       }
