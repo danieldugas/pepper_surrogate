@@ -30,6 +30,15 @@ double constrainAngle(double x){
     return x - M_PI;
 }
 
+bool quaternionIsUnit(tf2::Quaternion q) {
+  return std::abs(
+      (q.x() * q.x() +
+       q.y() * q.y() +
+       q.z() * q.z() +
+       q.w() * q.w()) - 1.0f
+      ) < 10e-6;
+}
+
 
 double clip(double n, double lower, double upper) {
   return std::max(lower, std::min(n, upper));
@@ -83,9 +92,7 @@ class OculusHeadController {
 
   public:
     explicit OculusHeadController(ros::NodeHandle& n) : nh_(n), tfListener_(tfBuffer_) {
-      int device_idx = 0;
-      
-      if (init_hmd(device_idx) != 0) {
+      if (init_hmd() != 0) {
         ROS_ERROR_STREAM("FAILED TO INITIALIZE HMD DEVICE");
         return;
       }
@@ -94,6 +101,8 @@ class OculusHeadController {
       const std::string kPepperPoseTopic = "/pepper_robot/pose/joint_angles";
       kFixedFrame = "odom";
       kHMDFrame = "oculus";
+      kLCtrFrame = "left_controller";
+      kRCtrFrame = "right_controller";
       kBaseLinkFrame = "base_footprint";
 
       // Publishers and subscribers.
@@ -101,8 +110,6 @@ class OculusHeadController {
 
       // Initialize times.
       pose_pub_last_publish_time_ = ros::Time::now();
-
-
 
       // Timer callbacks
       pose_timer_ = nh_.createTimer(ros::Duration(0.01), &OculusHeadController::timerCallback, this);
@@ -112,7 +119,8 @@ class OculusHeadController {
     ~OculusHeadController() {}
 
   protected:
-    int init_hmd(int device_idx) {
+    int init_hmd() {
+      controllers_disabled_ = false;
       ohmd_require_version(0, 3, 0);
 
       int major, minor, patch;
@@ -132,6 +140,10 @@ class OculusHeadController {
       printf("num devices: %d\n\n", num_devices);
 
       // Print device information
+      // & find index of headset and controllers
+      int hmd_index = -1;
+      int lctr_index = -1;
+      int rctr_index = -1;
       for(int i = 0; i < num_devices; i++){
         int device_class = 0, device_flags = 0;
         const char* device_class_s[] = {"HMD", "Controller", "Generic Tracker", "Unknown"};
@@ -139,6 +151,7 @@ class OculusHeadController {
         ohmd_list_geti(ctx_, i, OHMD_DEVICE_CLASS, &device_class);
         ohmd_list_geti(ctx_, i, OHMD_DEVICE_FLAGS, &device_flags);
 
+        std::string product_info = ohmd_list_gets(ctx_, i, OHMD_PRODUCT);
         printf("device %d\n", i);
         printf("  vendor:  %s\n", ohmd_list_gets(ctx_, i, OHMD_VENDOR));
         printf("  product: %s\n", ohmd_list_gets(ctx_, i, OHMD_PRODUCT));
@@ -150,15 +163,51 @@ class OculusHeadController {
         printf("    positional tracking: %s\n", device_flags & OHMD_DEVICE_FLAGS_POSITIONAL_TRACKING ? "yes" : "no");
         printf("    left controller:     %s\n", device_flags & OHMD_DEVICE_FLAGS_LEFT_CONTROLLER ? "yes" : "no");
         printf("    right controller:    %s\n\n", device_flags & OHMD_DEVICE_FLAGS_RIGHT_CONTROLLER ? "yes" : "no");
+
+        if (product_info == "Rift (CV1)") {
+          printf("  * Selected as headset device\n");
+          hmd_index = i;
+        } else if (product_info == "Rift (CV1): Right Controller") {
+          printf("  * Selected as right controller device\n");
+          rctr_index = i;
+        } else if (product_info == "Rift (CV1): Left Controller") {
+          printf("  * Selected as left controller device\n");
+          lctr_index = i;
+        }
       }
 
-      // Open specified device idx or 0 (default) if nothing specified
-      printf("opening device: %d\n", device_idx);
-      hmd_ = ohmd_list_open_device(ctx_, device_idx);
-      
+      // Open headset device
+      if (hmd_index == -1) {
+          ROS_ERROR_STREAM("FATAL: headset device not found. exiting.");
+          return -1;
+      }
+      printf("opening headset device: %d\n", hmd_index);
+      hmd_ = ohmd_list_open_device(ctx_, hmd_index);
       if(!hmd_){
-        printf("failed to open device: %s\n", ohmd_ctx_get_error(ctx_));
+        printf("failed to open headset device: %s\n", ohmd_ctx_get_error(ctx_));
         return -1;
+      }
+
+      // Open controller devices
+      if (lctr_index >= 0) {
+        lctr_ = ohmd_list_open_device(ctx_, lctr_index);
+        if(!lctr_){
+          ROS_ERROR_STREAM("failed to open left controller device (" << lctr_index << "), disabling controllers.");
+          controllers_disabled_ = true;
+        }
+      } else {
+        ROS_ERROR_STREAM("no device found for left controller, disabling controllers.");
+        controllers_disabled_ = true;
+      }
+      if (rctr_index >= 0) {
+        rctr_ = ohmd_list_open_device(ctx_, rctr_index);
+        if(!rctr_){
+          ROS_ERROR_STREAM("failed to open right controller device (" << rctr_index << "), disabling controllers.");
+          controllers_disabled_ = true;
+        }
+      } else {
+        ROS_ERROR_STREAM("no device found for right controller, disabling controllers.");
+        controllers_disabled_ = true;
       }
 
       // Print hardware information for the opened device
@@ -208,7 +257,7 @@ class OculusHeadController {
         pepper_in_world_ = tfBuffer_.lookupTransform(kFixedFrame, kBaseLinkFrame, ros::Time(0));
       }
       catch (tf2::TransformException &ex) {
-        ROS_WARN("%s",ex.what());
+        ROS_WARN_ONCE("%s",ex.what());
       }
     }
 
@@ -316,8 +365,72 @@ class OculusHeadController {
         }
       }
       puts("");
-        
-//       ohmd_sleep(.01);
+
+      // ---------------------
+      // Controllers
+
+      if (!controllers_disabled_) {
+
+
+        int n_controllers = 2;
+        for (int k = 0; k < n_controllers; k++) {
+
+        // select left or right controller
+        ohmd_device* ctr;
+        std::string ctr_frame;
+        if (k == 0) {
+          ctr = lctr_;
+          ctr_frame = kLCtrFrame;
+        } else {
+          ctr = rctr_;
+          ctr_frame = kRCtrFrame;
+        }
+
+        float f[16];
+        ohmd_device_getf(ctr, OHMD_ROTATION_QUAT, f);
+        tf2::Quaternion q(f[0], f[1], f[2], f[3]);
+
+        ohmd_device_getf(ctr, OHMD_POSITION_VECTOR, f);
+        tf2::Vector3 v(f[0], f[1], f[2]);
+
+        if (!quaternionIsUnit(q)) {
+          ROS_WARN_ONCE("Invalid quaternion for right controller. Waiting for correct value.");
+        } else {
+
+
+        tf2::Quaternion qtilt;
+        qtilt.setRPY(3.14159/2., 0.0, 0.0);
+
+
+        // Rotate the previous pose by 90 about X
+        // Then 90 about Z
+        tf2::Quaternion qrotx;
+        tf2::Quaternion qrotz;
+        qrotx.setRPY(-3.14159/2., 0.0, 0.0);
+        qrotz.setRPY(0.0, 0.0, 3.14159/2.);
+        // This is the same as creating a world to qtilt tf with qtilt as rot, (rotates the actual oculus frame)
+        // then a qtilt to oculus tf with q * qrotx * qrotz as tf (rotates the axes around the oculus)
+        q = qtilt * q * qrotx * qrotz;
+
+        geometry_msgs::TransformStamped transformStamped;
+        transformStamped.header.stamp = ros::Time::now();
+        transformStamped.header.frame_id = kFixedFrame;
+        transformStamped.child_frame_id = ctr_frame;
+        transformStamped.transform.translation.x = v.x();
+        transformStamped.transform.translation.y = v.y();
+        transformStamped.transform.translation.z = v.z();
+        transformStamped.transform.rotation.x = q.x();
+        transformStamped.transform.rotation.y = q.y();
+        transformStamped.transform.rotation.z = q.z();
+        transformStamped.transform.rotation.w = q.w();
+        br_.sendTransform(transformStamped);
+
+        }
+
+        }
+
+      }
+
     }
 
   private:
@@ -333,9 +446,14 @@ class OculusHeadController {
     std::string kBaseLinkFrame;
     std::string kFixedFrame;
     std::string kHMDFrame;
+    std::string kLCtrFrame;
+    std::string kRCtrFrame;
 
+    bool controllers_disabled_;
     ohmd_context* ctx_;
-    ohmd_device* hmd_;
+    ohmd_device* hmd_;  // headset
+    ohmd_device* lctr_; // left controller
+    ohmd_device* rctr_; // right controller
     int hmd_control_count_;
 
 }; // class OculusHeadController
