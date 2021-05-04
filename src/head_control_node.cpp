@@ -14,6 +14,7 @@
 #include <sensor_msgs/Joy.h>
 #include <geometry_msgs/Twist.h>
 #include <naoqi_bridge_msgs/JointAnglesWithSpeed.h>
+#include <pepper_surrogate/ButtonToggle.h>
 
 #include <openhmd.h>
 #include <assert.h>
@@ -99,7 +100,10 @@ class OculusHeadController {
 
       // Topic names.
       const std::string kPepperPoseTopic = "/pepper_robot/pose/joint_angles";
-      kFixedFrame = "odom";
+      const std::string kButtonATopic = "/oculus/button_a_toggle";
+      const std::string kButtonBTopic = "/oculus/button_b_toggle";
+      kVRRoomFrame = "vrroom";
+      kOdomFrame = "odom";
       kHMDFrame = "oculus";
       kLCtrFrame = "left_controller";
       kRCtrFrame = "right_controller";
@@ -107,6 +111,8 @@ class OculusHeadController {
 
       // Publishers and subscribers.
       pose_pub_ = nh_.advertise<naoqi_bridge_msgs::JointAnglesWithSpeed>(kPepperPoseTopic, 1);
+      button_a_pub_ = nh_.advertise<pepper_surrogate::ButtonToggle>(kButtonATopic, 1);
+      button_b_pub_ = nh_.advertise<pepper_surrogate::ButtonToggle>(kButtonBTopic, 1);
 
       // Initialize times.
       pose_pub_last_publish_time_ = ros::Time::now();
@@ -225,36 +231,15 @@ class OculusHeadController {
       print_infof(hmd_, "left eye aspect:",  1, OHMD_LEFT_EYE_ASPECT_RATIO);
       print_infof(hmd_, "right eye aspect:", 1, OHMD_RIGHT_EYE_ASPECT_RATIO);
       print_infof(hmd_, "distortion k:",     6, OHMD_DISTORTION_K);
-      
+
       print_infoi(hmd_, "control count:   ", 1, OHMD_CONTROL_COUNT);
-
-      ohmd_device_geti(hmd_, OHMD_CONTROL_COUNT, &hmd_control_count_);
-
-      const char* controls_fn_str[] = { "generic", "trigger", "trigger_click", "squeeze", "menu", "home",
-        "analog-x", "analog-y", "anlog_press", "button-a", "button-b", "button-x", "button-y",
-        "volume-up", "volume-down", "mic-mute"};
-
-      const char* controls_type_str[] = {"digital", "analog"};
-
-      int controls_fn[64];
-      int controls_types[64];
-
-      ohmd_device_geti(hmd_, OHMD_CONTROLS_HINTS, controls_fn);
-      ohmd_device_geti(hmd_, OHMD_CONTROLS_TYPES, controls_types);
-      
-      printf("%-25s", "controls:");
-      for(int i = 0; i < hmd_control_count_; i++){
-        printf("%s (%s)%s", controls_fn_str[controls_fn[i]], controls_type_str[controls_types[i]], i == hmd_control_count_ - 1 ? "" : ", ");
-      }
-
-      printf("\n\n");
 
       return 0;
     }
 
     void gettfCallback(const ros::TimerEvent& e) {
       try{
-        pepper_in_world_ = tfBuffer_.lookupTransform(kFixedFrame, kBaseLinkFrame, ros::Time(0));
+        pepper_in_world_ = tfBuffer_.lookupTransform(kVRRoomFrame, kBaseLinkFrame, ros::Time(0));
       }
       catch (tf2::TransformException &ex) {
         ROS_WARN_ONCE("%s",ex.what());
@@ -265,53 +250,118 @@ class OculusHeadController {
 
       ohmd_ctx_update(ctx_);
 
-      // this can be used to set a different zero point
-      // for rotation and position, but is not required.
-      //float zero[] = {.0, .0, .0, 1};
-      //ohmd_device_setf(hmd_, OHMD_ROTATION_QUAT, zero);
-      //ohmd_device_setf(hmd_, OHMD_POSITION_VECTOR, zero);
-
       // get rotation and position
       print_infof(hmd_, "rotation quat:", 4, OHMD_ROTATION_QUAT);
       print_infof(hmd_, "position vec: ", 3, OHMD_POSITION_VECTOR);
 
       float f[16];
       ohmd_device_getf(hmd_, OHMD_ROTATION_QUAT, f);
-      tf2::Quaternion q(
-      f[0],
-      f[1],
-      f[2],
-      f[3]
-      );
+      tf2::Quaternion q(f[0], f[1], f[2], f[3]);
+      q = oculusToROSFrameRotation(q);
+      sendTransform(ros::Time::now(), kOdomFrame, kVRRoomFrame, tf2::Vector3(0., 0., 1.), tf2::Quaternion::getIdentity());
+      sendTransform(ros::Time::now(), kVRRoomFrame, kHMDFrame, tf2::Vector3(0., 0., 1.), q);
+      sendHeadTrackingJointAngles(q);
 
 
-      tf2::Quaternion qtilt;
-      qtilt.setRPY(3.14159/2., 0.0, 0.0);
+      // ---------------------
+      // Controllers
+      if (!controllers_disabled_) {
 
+        int n_controllers = 2;
+        for (int k = 0; k < n_controllers; k++) {
 
-      // Rotate the previous pose by 90 about X
-      // Then 90 about Z
-      tf2::Quaternion qrotx;
-      tf2::Quaternion qrotz;
-      qrotx.setRPY(-3.14159/2., 0.0, 0.0);
-      qrotz.setRPY(0.0, 0.0, 3.14159/2.);
-      // This is the same as creating a world to qtilt tf with qtilt as rot, (rotates the actual oculus frame)
-      // then a qtilt to oculus tf with q * qrotx * qrotz as tf (rotates the axes around the oculus)
-      q = qtilt * q * qrotx * qrotz;
+          // select left or right controller
+          ohmd_device* ctr;
+          std::string ctr_frame;
+          float* prev_control_state;
+          if (k == 0) {
+            ctr = lctr_;
+            ctr_frame = kLCtrFrame;
+            prev_control_state = lctr_prev_state_;
+          } else {
+            ctr = rctr_;
+            ctr_frame = kRCtrFrame;
+            prev_control_state = rctr_prev_state_;
+          }
 
-      geometry_msgs::TransformStamped transformStamped;
-      transformStamped.header.stamp = ros::Time::now();
-      transformStamped.header.frame_id = kFixedFrame;
-      transformStamped.child_frame_id = kHMDFrame;
-      transformStamped.transform.translation.x = 0.0;
-      transformStamped.transform.translation.y = 0.0;
-      transformStamped.transform.translation.z = 1.0;
-      transformStamped.transform.rotation.x = q.x();
-      transformStamped.transform.rotation.y = q.y();
-      transformStamped.transform.rotation.z = q.z();
-      transformStamped.transform.rotation.w = q.w();
-      br_.sendTransform(transformStamped);
+          float f[16];
+          ohmd_device_getf(ctr, OHMD_ROTATION_QUAT, f);
+          tf2::Quaternion q(f[0], f[1], f[2], f[3]);
 
+          ohmd_device_getf(ctr, OHMD_POSITION_VECTOR, f);
+          tf2::Vector3 v(f[0], f[1], f[2]);
+
+          if (!quaternionIsUnit(q)) {
+            ROS_WARN_ONCE("Invalid quaternion for right controller. Waiting for correct value.");
+          } else {
+            q = oculusToROSFrameRotation(q);
+            sendTransform(ros::Time::now(), kVRRoomFrame, ctr_frame, v, q);
+          }
+
+          // buttons state
+          const char* controls_fn_str[] = { "generic", "trigger", "trigger_click", "squeeze", "menu", "home",
+            "analog-x", "analog-y", "anlog_press", "button-a", "button-b", "button-x", "button-y",
+            "volume-up", "volume-down", "mic-mute"};
+          const char* controls_type_str[] = {"digital", "analog"};
+
+          int control_count;
+          ohmd_device_geti(ctr, OHMD_CONTROL_COUNT, &control_count);
+
+          int controls_fn[64];
+          int controls_types[64];
+          ohmd_device_geti(ctr, OHMD_CONTROLS_HINTS, controls_fn);
+          ohmd_device_geti(ctr, OHMD_CONTROLS_TYPES, controls_types);
+
+          if (control_count) {
+            float control_state[256];
+            ohmd_device_getf(ctr, OHMD_CONTROLS_STATE, control_state);
+
+            // DEBUG
+            printf("%-25s", "controls:");
+            for(int i = 0; i < control_count; i++){
+              printf("%s (%s)%s", controls_fn_str[controls_fn[i]], controls_type_str[controls_types[i]], i == hmd_control_count_ - 1 ? "" : ", ");
+            }
+            printf("\n");
+            printf("%-25s", "controls state:");
+            for(int i = 0; i < control_count; i++)
+            {
+              printf("%f ", control_state[i]);
+            }
+            printf("\n");
+            printf("%-25s", "prev controls state:");
+            for(int i = 0; i < control_count; i++)
+            {
+              printf("%f ", prev_control_state[i]);
+            }
+            printf("\n");
+            printf("\n\n");
+
+            for(int i = 0; i < control_count; i++){
+              bool is_toggled = false;
+              if (control_state[i] != prev_control_state[i]) {
+                is_toggled = true;
+              }
+              prev_control_state[i] = control_state[i];
+              if (strcmp(controls_fn_str[controls_fn[i]], "button-a") == 0 && is_toggled) {
+                pepper_surrogate::ButtonToggle msg;
+                msg.event = (control_state[i] ?  msg.PRESSED : msg.RELEASED);
+                button_a_pub_.publish(msg);
+              } else if (strcmp(controls_fn_str[controls_fn[i]], "button-b") == 0 && is_toggled) {
+                pepper_surrogate::ButtonToggle msg;
+                msg.event = (control_state[i] ?  msg.PRESSED : msg.RELEASED);
+                button_b_pub_.publish(msg);
+              }
+            }
+
+          } // if control count
+
+        } // for each controller
+      } // if controllers enabled
+    }
+
+    // tracks oculus pose with pepper head, by sending the appropriate joint angles
+    // q: oculus 3dof pose in vrroom frame
+    void sendHeadTrackingJointAngles(tf2::Quaternion q) {
       // oculus pose as euler angles in world frame
       double oculus_roll, oculus_pitch, oculus_yaw;
       tf2::Matrix3x3(q).getRPY(oculus_roll, oculus_pitch, oculus_yaw);
@@ -325,7 +375,7 @@ class OculusHeadController {
           pepper_in_world_.transform.rotation.w);
       tf2::Matrix3x3(qpepper_in_world).getRPY(pepper_roll, pepper_pitch, pepper_yaw);
       // we only care about yaw (assume base_footprint is horizontal)
-      // TODO: check that base_footprint and world z axis are aligned?
+      // TODO: check that base_footprint and vrroom (odom) z axis are aligned?
       double relative_yaw = constrainAngle(oculus_yaw - pepper_yaw);
 
       // Control pepper head to oculus pose
@@ -352,70 +402,13 @@ class OculusHeadController {
         pose_pub_.publish(joint_angles_msg);
         pose_pub_last_publish_time_ = ros::Time::now();
       }
+    }
 
-      // read controls
-      if (hmd_control_count_) {
-        float control_state[256];
-        ohmd_device_getf(hmd_, OHMD_CONTROLS_STATE, control_state);
-
-        printf("%-25s", "controls state:");
-        for(int i = 0; i < hmd_control_count_; i++)
-        {
-          printf("%f ", control_state[i]);
-        }
-      }
-      puts("");
-
-      // ---------------------
-      // Controllers
-
-      if (!controllers_disabled_) {
-
-
-        int n_controllers = 2;
-        for (int k = 0; k < n_controllers; k++) {
-
-        // select left or right controller
-        ohmd_device* ctr;
-        std::string ctr_frame;
-        if (k == 0) {
-          ctr = lctr_;
-          ctr_frame = kLCtrFrame;
-        } else {
-          ctr = rctr_;
-          ctr_frame = kRCtrFrame;
-        }
-
-        float f[16];
-        ohmd_device_getf(ctr, OHMD_ROTATION_QUAT, f);
-        tf2::Quaternion q(f[0], f[1], f[2], f[3]);
-
-        ohmd_device_getf(ctr, OHMD_POSITION_VECTOR, f);
-        tf2::Vector3 v(f[0], f[1], f[2]);
-
-        if (!quaternionIsUnit(q)) {
-          ROS_WARN_ONCE("Invalid quaternion for right controller. Waiting for correct value.");
-        } else {
-
-
-        tf2::Quaternion qtilt;
-        qtilt.setRPY(3.14159/2., 0.0, 0.0);
-
-
-        // Rotate the previous pose by 90 about X
-        // Then 90 about Z
-        tf2::Quaternion qrotx;
-        tf2::Quaternion qrotz;
-        qrotx.setRPY(-3.14159/2., 0.0, 0.0);
-        qrotz.setRPY(0.0, 0.0, 3.14159/2.);
-        // This is the same as creating a world to qtilt tf with qtilt as rot, (rotates the actual oculus frame)
-        // then a qtilt to oculus tf with q * qrotx * qrotz as tf (rotates the axes around the oculus)
-        q = qtilt * q * qrotx * qrotz;
-
+    void sendTransform(ros::Time time, std::string parent, std::string child, tf2::Vector3 v, tf2::Quaternion q) {
         geometry_msgs::TransformStamped transformStamped;
-        transformStamped.header.stamp = ros::Time::now();
-        transformStamped.header.frame_id = kFixedFrame;
-        transformStamped.child_frame_id = ctr_frame;
+        transformStamped.header.stamp = time;
+        transformStamped.header.frame_id = parent;
+        transformStamped.child_frame_id = child;
         transformStamped.transform.translation.x = v.x();
         transformStamped.transform.translation.y = v.y();
         transformStamped.transform.translation.z = v.z();
@@ -424,13 +417,18 @@ class OculusHeadController {
         transformStamped.transform.rotation.z = q.z();
         transformStamped.transform.rotation.w = q.w();
         br_.sendTransform(transformStamped);
+    }
 
-        }
-
-        }
-
-      }
-
+    tf2::Quaternion oculusToROSFrameRotation(tf2::Quaternion q) {
+        // qrotx and qrotz make the z axis point up in the oculus frame
+        // qtilt makes the headset point up in the oculus frame
+        tf2::Quaternion qtilt, qrotx, qrotz;
+        qtilt.setRPY(3.14159/2., 0.0, 0.0);
+        qrotx.setRPY(-3.14159/2., 0.0, 0.0);
+        qrotz.setRPY(0.0, 0.0, 3.14159/2.);
+        // This is the same as creating a world to qtilt tf with qtilt as rot, (rotates the actual oculus frame)
+        // then a qtilt to oculus tf with q * qrotx * qrotz as tf (rotates the axes around the oculus)
+        return qtilt * q * qrotx * qrotz;
     }
 
   private:
@@ -438,13 +436,16 @@ class OculusHeadController {
     ros::Timer pose_timer_;
     ros::Timer get_tf_timer_;
     ros::Publisher pose_pub_;
+    ros::Publisher button_a_pub_;
+    ros::Publisher button_b_pub_;
     ros::Time pose_pub_last_publish_time_;
     tf2_ros::TransformBroadcaster br_;
     tf2_ros::Buffer tfBuffer_;
     tf2_ros::TransformListener tfListener_;
     geometry_msgs::TransformStamped pepper_in_world_;
     std::string kBaseLinkFrame;
-    std::string kFixedFrame;
+    std::string kVRRoomFrame;
+    std::string kOdomFrame;
     std::string kHMDFrame;
     std::string kLCtrFrame;
     std::string kRCtrFrame;
@@ -455,6 +456,10 @@ class OculusHeadController {
     ohmd_device* lctr_; // left controller
     ohmd_device* rctr_; // right controller
     int hmd_control_count_;
+    int lctr_control_count_;
+    int rctr_control_count_;
+    float lctr_prev_state_[256];
+    float rctr_prev_state_[256];
 
 }; // class OculusHeadController
 

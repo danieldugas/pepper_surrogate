@@ -1,6 +1,8 @@
 cmake_minimum_required(VERSION 3.1.0)
 project(pepper_surrogate)
 
+set( CMAKE_EXPORT_COMPILE_COMMANDS ON )
+
 # This assumes that you are using the provided binary files.
 # To use newer versions of OpenHMD, simply compile your library and
 # copy the binary and header into rviz_openhmd/OpenHMD in this repo. 
@@ -20,8 +22,24 @@ set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++11 ")
 find_package(catkin REQUIRED COMPONENTS
   rviz
   tf2_ros
+  message_generation
 )
-catkin_package()
+
+# messages
+add_message_files(
+  FILES
+  ButtonToggle.msg
+)
+generate_messages(
+  DEPENDENCIES
+  std_msgs
+)
+
+catkin_package(
+  CATKIN_DEPENDS
+  message_runtime
+  )
+
 include_directories(${catkin_INCLUDE_DIRS})
 link_directories(${catkin_LIBRARY_DIRS})
 
