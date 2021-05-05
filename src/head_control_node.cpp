@@ -16,6 +16,7 @@
 #include <naoqi_bridge_msgs/JointAnglesWithSpeed.h>
 #include <pepper_surrogate/ButtonToggle.h>
 
+#include <tf2_eigen/tf2_eigen.h>
 #include <openhmd.h>
 #include <assert.h>
 #include <stdio.h>
@@ -257,10 +258,13 @@ class OculusHeadController {
       float f[16];
       ohmd_device_getf(hmd_, OHMD_ROTATION_QUAT, f);
       tf2::Quaternion q(f[0], f[1], f[2], f[3]);
-      q = oculusToROSFrameRotation(q);
+      tf2::Vector3 v(0., 0., 0.);
+      tf2::Quaternion new_q;
+      tf2::Vector3 new_v;
+      oculusToROSFrameRotation(q, v, new_q, new_v);
       sendTransform(ros::Time::now(), kOdomFrame, kVRRoomFrame, tf2::Vector3(0., 0., 1.), tf2::Quaternion::getIdentity());
-      sendTransform(ros::Time::now(), kVRRoomFrame, kHMDFrame, tf2::Vector3(0., 0., 1.), q);
-      sendHeadTrackingJointAngles(q);
+      sendTransform(ros::Time::now(), kVRRoomFrame, kHMDFrame, tf2::Vector3(0., 0., 1.), new_q);
+      sendHeadTrackingJointAngles(new_q);
 
 
       // ---------------------
@@ -294,8 +298,11 @@ class OculusHeadController {
           if (!quaternionIsUnit(q)) {
             ROS_WARN_ONCE("Invalid quaternion for right controller. Waiting for correct value.");
           } else {
-            q = oculusToROSFrameRotation(q);
-            sendTransform(ros::Time::now(), kVRRoomFrame, ctr_frame, v, q);
+
+            tf2::Quaternion new_q;
+            tf2::Vector3 new_v;
+            oculusToROSFrameRotation(q, v, new_q, new_v);
+            sendTransform(ros::Time::now(), kVRRoomFrame, ctr_frame, new_v, new_q);
           }
 
           // buttons state
@@ -419,7 +426,7 @@ class OculusHeadController {
         br_.sendTransform(transformStamped);
     }
 
-    tf2::Quaternion oculusToROSFrameRotation(tf2::Quaternion q) {
+    void oculusToROSFrameRotation(tf2::Quaternion q, tf2::Vector3 v, tf2::Quaternion& new_q, tf2::Vector3& new_v) {
         // qrotx and qrotz make the z axis point up in the oculus frame
         // qtilt makes the headset point up in the oculus frame
         tf2::Quaternion qtilt, qrotx, qrotz;
@@ -428,7 +435,18 @@ class OculusHeadController {
         qrotz.setRPY(0.0, 0.0, 3.14159/2.);
         // This is the same as creating a world to qtilt tf with qtilt as rot, (rotates the actual oculus frame)
         // then a qtilt to oculus tf with q * qrotx * qrotz as tf (rotates the axes around the oculus)
-        return qtilt * q * qrotx * qrotz;
+//         new_q = qtilt * q * qrotx * qrotz;
+        Eigen::Translation3d ev;
+        tf2::convert(v, ev);
+        Eigen::Quaterniond eq, eqtilt, eqrotx, eqrotz;
+        tf2::convert(q, eq);
+        tf2::convert(qtilt, eqtilt);
+        tf2::convert(qrotx, eqrotx);
+        tf2::convert(qrotz, eqrotz);
+        Eigen::Affine3d in = eq * ev;
+        Eigen::Affine3d out = eqtilt * in * eqrotx * eqrotz;
+        tf2::convert(out, new_q);
+        tf2::convert(out, new_v);
     }
 
   private:
