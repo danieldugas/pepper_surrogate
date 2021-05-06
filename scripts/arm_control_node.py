@@ -36,6 +36,7 @@ kLeftControllerFrame = "oculus_left_controller"
 # controller frame != pepper hand frame even if the hands are superposed!
 # find static transformation between controller frame and pepper hand if it was holding the controller
 se3_vrhand_in_controller = se3.rotation_matrix(np.pi / 2., np.array([1., 0., 0.]))
+se3_vrhand_in_controller[2, 3] = -0.05
 
 def se3_from_transformstamped(trans):
     """ 
