@@ -260,12 +260,13 @@ class OculusHeadController {
       float f[16];
       ohmd_device_getf(hmd_, OHMD_ROTATION_QUAT, f);
       tf::Quaternion q(f[0], f[1], f[2], f[3]);
-      tf::Vector3 v(0., 0., 0.);
-      tf::Transform t(q, v);
-      tf::Transform new_t = oculusToROSFrameRotation(t);
+      ohmd_device_getf(hmd_, OHMD_POSITION_VECTOR, f);
+      tf::Vector3 v(f[0], f[1], f[2]);
+      tf::Transform new_t = oculusToROSFrameRotation(tf::Transform(q, v));
       q = new_t.getRotation();
-      sendTransform(ros::Time::now(), kOdomFrame, kVRRoomFrame, tf::Vector3(0., 0., 1.), tf::Quaternion::getIdentity());
-      sendTransform(ros::Time::now(), kVRRoomFrame, kHMDFrame, tf::Vector3(0., 0., 1.), q);
+      v = new_t.getOrigin();
+      sendTransform(ros::Time::now(), kOdomFrame, kVRRoomFrame, tf::Vector3(0., 0., 0.1), tf::Quaternion::getIdentity());
+      sendTransform(ros::Time::now(), kVRRoomFrame, kHMDFrame, v, q);
       sendHeadTrackingJointAngles(q);
 
 

@@ -35,8 +35,11 @@ kLeftControllerFrame = "oculus_left_controller"
 
 # controller frame != pepper hand frame even if the hands are superposed!
 # find static transformation between controller frame and pepper hand if it was holding the controller
-se3_vrhand_in_controller = se3.rotation_matrix(np.pi / 2., np.array([1., 0., 0.]))
-se3_vrhand_in_controller[2, 3] = -0.05
+# rotate right along x axis (wrist axis)
+se3_right_vrhand_in_controller = se3.rotation_matrix(np.pi / 2., np.array([1., 0., 0.]))
+se3_right_vrhand_in_controller[2, 3] = -0.05
+se3_left_vrhand_in_controller = se3.rotation_matrix(-np.pi / 2., np.array([1., 0., 0.]))
+se3_left_vrhand_in_controller[2, 3] = -0.05
 
 def se3_from_transformstamped(trans):
     """ 
@@ -94,10 +97,20 @@ class VirtualArm:
         - use gravity to correct wrist rotation error
         - use hand-eye transform and claw-camera transform to infer scale
         """
-        self.joint_angles = right_arm_zero_pose.values()
+        # left vs right functions and constants
+        if self.side == "right":
+            zero_pose_angles = right_arm_zero_pose.values()
+            arm_get_position = pk.right_arm_get_position
+            se3_vrhand_in_controller = se3_right_vrhand_in_controller
+        else:
+            zero_pose_angles = left_arm_zero_pose.values()
+            arm_get_position = pk.left_arm_get_position
+            se3_vrhand_in_controller = se3_left_vrhand_in_controller
+        # initialize joint angles
+        self.joint_angles = zero_pose_angles
         # forward kinematics
         se3_virtual_claw_in_virtual_torso = se3_from_pos_rot3(
-            *pk.right_arm_get_position(self.joint_angles))
+            *arm_get_position(self.joint_angles))
         se3_virtual_torso_in_virtual_claw = se3.inverse_matrix(se3_virtual_claw_in_virtual_torso)
         # assume hand and claw are in the same place (user did a good job) to find virtual torso estimate
         # TODO: actual rotation of controller is not same as virtual claw. correct
@@ -128,6 +141,13 @@ class VirtualArm:
         Notes:
         - use headset movement to infer torso drift
         """
+        # left vs right functions and constants
+        if self.side == "right":
+            arm_set_position = pk.right_arm_set_position
+            se3_vrhand_in_controller = se3_right_vrhand_in_controller
+        else:
+            arm_set_position = pk.left_arm_set_position
+            se3_vrhand_in_controller = se3_left_vrhand_in_controller
         # compose tfs to get virtual_claw in virtual_torso
         # vrroom -> controller -> vrhand -> virtual_claw
         # vrroom -> virtual_torso
@@ -147,22 +167,32 @@ class VirtualArm:
         )
         new_pos = se3.translation_from_matrix(se3_virtual_claw_in_virtual_torso)
         new_rot = se3_virtual_claw_in_virtual_torso[:3, :3]
-        new_angles = pk.right_arm_set_position(self.joint_angles, new_pos, new_rot, epsilon = 0.1)
+        new_angles = arm_set_position(self.joint_angles, new_pos, new_rot, epsilon = 0.1)
         if new_angles is not None:
             self.joint_angles = new_angles
 
     def visualize(self, tf_br):
         """ show the virtual arm in rviz
         """
-        joint_frames = ["RShoulder", "RBicep", "RElbow", "RForeArm", "r_wrist", "RHand"]
+        # left vs right functions and constants
+        if self.side == "right":
+            arm_get_position = pk.right_arm_get_position
+            se3_vrhand_in_controller = se3_right_vrhand_in_controller
+            joint_frames = ["RShoulder", "RBicep", "RElbow", "RForeArm", "r_wrist", "RHand"]
+            torso_frame = "virtualarm_RTorso"
+        else:
+            arm_get_position = pk.left_arm_get_position
+            se3_vrhand_in_controller = se3_left_vrhand_in_controller
+            joint_frames = ["LShoulder", "LBicep", "LElbow", "LForeArm", "l_wrist", "LHand"]
+            torso_frame = "virtualarm_LTorso"
         # get position, orientation for every joint in arm
-        pos_in_torso, ori_in_torso = pk.right_arm_get_position(self.joint_angles, full_pos=True)
+        pos_in_torso, ori_in_torso = arm_get_position(self.joint_angles, full_pos=True)
         time = rospy.Time.now()
         # publish tfs
         for pos, rot, frame in zip(pos_in_torso, ori_in_torso, joint_frames):
             t = TransformStamped()
             t.header.stamp = time
-            t.header.frame_id = "virtualarm_RTorso"
+            t.header.frame_id = torso_frame
             t.child_frame_id = "virtualarm_" + frame
             t.transform.translation.x = pos[0]
             t.transform.translation.y = pos[1]
@@ -177,7 +207,7 @@ class VirtualArm:
         t = TransformStamped()
         t.header.stamp = time
         t.header.frame_id = kVRRoomFrame
-        t.child_frame_id = "virtualarm_RTorso"
+        t.child_frame_id = torso_frame
         pos = se3.translation_from_matrix(self.se3_virtual_torso_in_vrroom)
         t.transform.translation.x = pos[0]
         t.transform.translation.y = pos[1]
@@ -199,7 +229,7 @@ class ArmControlNode:
         rospy.init_node("stereo_cameras")
 
         # variables
-        self.virtual_arm = None
+        self.virtual_arms = {"right": None, "left": None}
         self.current_state = "idle"
 
         # publishers
@@ -220,17 +250,33 @@ class ArmControlNode:
     def is_zero_pose_reached(self):
         return True
 
-    def visualize_vrhand(self):
+    def visualize_vrhands(self):
         """ publishes the static transform from controller to vrhand """
+        # Right
         t = TransformStamped()
         t.header.stamp = rospy.Time.now()
         t.header.frame_id = kRightControllerFrame
         t.child_frame_id = "oculus_right_vrhand"
-        pos = se3.translation_from_matrix(se3_vrhand_in_controller)
+        pos = se3.translation_from_matrix(se3_right_vrhand_in_controller)
         t.transform.translation.x = pos[0]
         t.transform.translation.y = pos[1]
         t.transform.translation.z = pos[2]
-        q = se3.quaternion_from_matrix(se3_vrhand_in_controller)
+        q = se3.quaternion_from_matrix(se3_right_vrhand_in_controller)
+        t.transform.rotation.x = q[0]
+        t.transform.rotation.y = q[1]
+        t.transform.rotation.z = q[2]
+        t.transform.rotation.w = q[3]
+        self.tf_br.sendTransform(t)
+        # Left
+        t = TransformStamped()
+        t.header.stamp = rospy.Time.now()
+        t.header.frame_id = kLeftControllerFrame
+        t.child_frame_id = "oculus_left_vrhand"
+        pos = se3.translation_from_matrix(se3_left_vrhand_in_controller)
+        t.transform.translation.x = pos[0]
+        t.transform.translation.y = pos[1]
+        t.transform.translation.z = pos[2]
+        q = se3.quaternion_from_matrix(se3_left_vrhand_in_controller)
         t.transform.rotation.x = q[0]
         t.transform.rotation.y = q[1]
         t.transform.rotation.z = q[2]
@@ -239,34 +285,37 @@ class ArmControlNode:
 
     def arm_controller_routine(self, event=None):
         # show vrhand
-        self.visualize_vrhand()
+        self.visualize_vrhands()
 
-        # get controllers tf
-        se3_controller_in_vrroom = None
-        if self.current_state in ["tracking", "trackingactive", "zero"]:
-            try:
-                trans = self.tf_buf.lookup_transform(kVRRoomFrame, kRightControllerFrame, rospy.Time())
-            except (tf2_ros.LookupException, tf2_ros.ConnectivityException, tf2_ros.ExtrapolationException) as e:
-                print(e)
-                return
-            se3_controller_in_vrroom = se3_from_transformstamped(trans)
+        # for each hand
+        for side in ["right", "left"]:
+            controller_frame = kRightControllerFrame if side == "right" else kLeftControllerFrame
+            # get controllers tf
+            se3_controller_in_vrroom = None
+            if self.current_state in ["tracking", "trackingactive", "zero"]:
+                try:
+                    trans = self.tf_buf.lookup_transform(kVRRoomFrame, controller_frame, rospy.Time())
+                except (tf2_ros.LookupException, tf2_ros.ConnectivityException, tf2_ros.ExtrapolationException) as e:
+                    print(e)
+                    return
+                se3_controller_in_vrroom = se3_from_transformstamped(trans)
 
-        # update virtual arm angles
-        if self.current_state in ["tracking", "trackingactive"]:
-            self.virtual_arm.update(se3_controller_in_vrroom)
-            self.virtual_arm.visualize(self.tf_br)
+            # update virtual arm angles
+            if self.current_state in ["tracking", "trackingactive"]:
+                self.virtual_arms[side].update(se3_controller_in_vrroom)
+                self.virtual_arms[side].visualize(self.tf_br)
 
-        # get virtual arm joint angles, publish them
-        if self.current_state == "trackingactive":
-            pass
+            # get virtual arm joint angles, publish them
+            if self.current_state == "trackingactive":
+                pass
 
-        if self.current_state == "zero":
-            # create new temporary virtual arm and display it
-            # when comfirm button is pressed the temporary arm will become permanent and joints unlocked
-            # debug: visualize virtual arm before confirm button is pressed
-            self.virtual_arm = VirtualArm()
-            self.virtual_arm.initialize_from_zero_pose_forward_kinematics(se3_controller_in_vrroom, self.tf_br)
-            self.virtual_arm.visualize(self.tf_br)
+            if self.current_state == "zero":
+                # create new temporary virtual arm and display it
+                # when comfirm button is pressed the temporary arm will become permanent and joints unlocked
+                # debug: visualize virtual arm before confirm button is pressed
+                self.virtual_arms[side] = VirtualArm(side=side)
+                self.virtual_arms[side].initialize_from_zero_pose_forward_kinematics(se3_controller_in_vrroom, self.tf_br)
+                self.virtual_arms[side].visualize(self.tf_br)
 
 
     def zeroswitch_toggle_callback(self, msg):
