@@ -1,0 +1,41 @@
+<?xml version="1.0"?>
+<robot name="oculus">
+  <link name="oculus">
+    <visual>
+      <geometry>
+        <box size="0.1 0.2 0.1"/>
+      </geometry>
+      <origin rpy="0 0 0" xyz="0 0 0"/>
+    </visual>
+  </link>
+  <joint name="oculus_to_rcontroller" type="revolute">
+    <parent link="oculus"/>
+    <child link="oculus_right_controller"/>
+    <origin rpy="0 0 0" xyz="0 0 0"/>
+    <axis xyz="0 0 1.0"/>
+    <limit effort="2.666" lower="-1.56207" upper="-0.00872665" velocity="9.22756"/>
+  </joint>
+  <link name="oculus_right_controller">
+    <visual>
+      <geometry>
+        <cylinder length="0.01" radius="0.05"/>
+      </geometry>
+      <origin rpy="0 1.6 0" xyz="0 0 0"/>
+    </visual>
+  </link>
+  <joint name="right_controller_to_right_vrhand" type="revolute">
+    <parent link="oculus_right_controller"/>
+    <child link="oculus_right_vrhand"/>
+    <origin rpy="0 0 0" xyz="0 0 0"/>
+    <axis xyz="0 0 1.0"/>
+    <limit effort="2.666" lower="-1.56207" upper="-0.00872665" velocity="9.22756"/>
+  </joint>
+  <link name="oculus_right_vrhand">
+    <visual>
+      <geometry>
+        <mesh filename="package://pepper_surrogate/meshes/Hand.dae" scale="0.05 0.05 0.05"/>
+      </geometry>
+      <origin rpy="0 0.8 3.14" xyz="0 0 0"/>
+    </visual>
+  </link>
+</robot>

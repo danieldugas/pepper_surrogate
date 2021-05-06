@@ -30,12 +30,12 @@ right_arm_zero_pose = {
 }
 
 kVRRoomFrame = "vrroom"
-kRightControllerFrame = "right_controller"
-kLeftControllerFrame = "left_controller"
+kRightControllerFrame = "oculus_right_controller"
+kLeftControllerFrame = "oculus_left_controller"
 
 # controller frame != pepper hand frame even if the hands are superposed!
 # find static transformation between controller frame and pepper hand if it was holding the controller
-se3_vrhand_in_controller = se3.identity_matrix()
+se3_vrhand_in_controller = se3.rotation_matrix(np.pi / 2., np.array([1., 0., 0.]))
 
 def se3_from_transformstamped(trans):
     """ 
@@ -103,53 +103,6 @@ class VirtualArm:
         #       gravity align torso frame in vrroom frame to correct error
         # TODO: actual scale is not the same. correct
         se3_virtual_claw_in_vrhand = se3.identity_matrix()
-        if True:
-            time = rospy.Time.now()
-            # DEBUG - publsh debug tfs
-            t = TransformStamped()
-            t.header.stamp = time
-            t.header.frame_id = kRightControllerFrame
-            t.child_frame_id = "dbg_vrhand"
-            p = se3.translation_from_matrix(se3_vrhand_in_controller)
-            t.transform.translation.x = p[0]
-            t.transform.translation.y = p[1]
-            t.transform.translation.z = p[2]
-            q = se3.quaternion_from_matrix(se3_vrhand_in_controller)
-            t.transform.rotation.x = q[0]
-            t.transform.rotation.y = q[1]
-            t.transform.rotation.z = q[2]
-            t.transform.rotation.w = q[3]
-            tf_br.sendTransform(t)
-            #
-            t = TransformStamped()
-            t.header.stamp = time
-            t.header.frame_id = "dbg_vrhand"
-            t.child_frame_id = "dbg_virtual_claw"
-            p = se3.translation_from_matrix(se3_virtual_claw_in_vrhand)
-            t.transform.translation.x = p[0]
-            t.transform.translation.y = p[1]
-            t.transform.translation.z = p[2]
-            q = se3.quaternion_from_matrix(se3_virtual_claw_in_vrhand)
-            t.transform.rotation.x = q[0]
-            t.transform.rotation.y = q[1]
-            t.transform.rotation.z = q[2]
-            t.transform.rotation.w = q[3]
-            tf_br.sendTransform(t)
-            #
-            t = TransformStamped()
-            t.header.stamp = time
-            t.header.frame_id = "dbg_virtual_claw"
-            t.child_frame_id = "dbg_virtualarm_torso"
-            p = se3.translation_from_matrix(se3.inverse_matrix(se3_virtual_claw_in_virtual_torso))
-            t.transform.translation.x = p[0]
-            t.transform.translation.y = p[1]
-            t.transform.translation.z = p[2]
-            q = se3.quaternion_from_matrix(se3.inverse_matrix(se3_virtual_claw_in_virtual_torso))
-            t.transform.rotation.x = q[0]
-            t.transform.rotation.y = q[1]
-            t.transform.rotation.z = q[2]
-            t.transform.rotation.w = q[3]
-            tf_br.sendTransform(t)
         # compose tfs to get virtual torso in vrroom
         # vrroom -> controller -> vrhand -> virtual_claw -> virtual_torso
         se3_vrhand_in_vrroom = np.dot(
@@ -266,7 +219,27 @@ class ArmControlNode:
     def is_zero_pose_reached(self):
         return True
 
+    def visualize_vrhand(self):
+        """ publishes the static transform from controller to vrhand """
+        t = TransformStamped()
+        t.header.stamp = rospy.Time.now()
+        t.header.frame_id = kRightControllerFrame
+        t.child_frame_id = "oculus_right_vrhand"
+        pos = se3.translation_from_matrix(se3_vrhand_in_controller)
+        t.transform.translation.x = pos[0]
+        t.transform.translation.y = pos[1]
+        t.transform.translation.z = pos[2]
+        q = se3.quaternion_from_matrix(se3_vrhand_in_controller)
+        t.transform.rotation.x = q[0]
+        t.transform.rotation.y = q[1]
+        t.transform.rotation.z = q[2]
+        t.transform.rotation.w = q[3]
+        self.tf_br.sendTransform(t)
+
     def arm_controller_routine(self, event=None):
+        # show vrhand
+        self.visualize_vrhand()
+
         # get controllers tf
         se3_controller_in_vrroom = None
         if self.current_state in ["tracking", "trackingactive", "zero"]:

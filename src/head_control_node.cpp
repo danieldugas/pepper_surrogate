@@ -108,8 +108,8 @@ class OculusHeadController {
       kVRRoomFrame = "vrroom";
       kOdomFrame = "odom";
       kHMDFrame = "oculus";
-      kLCtrFrame = "left_controller";
-      kRCtrFrame = "right_controller";
+      kLCtrFrame = "oculus_left_controller";
+      kRCtrFrame = "oculus_right_controller";
       kBaseLinkFrame = "base_footprint";
 
       // Publishers and subscribers.
