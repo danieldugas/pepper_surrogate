@@ -1,2 +1,3 @@
 external/python_pepper_kinematics/pepper_kinematics.egg-info
 *.pyc
+.cache

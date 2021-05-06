@@ -1,6 +1,9 @@
 <?xml version="1.0"?>
 <launch>
 
+  <arg name="model" default="$(find pepper_surrogate)/urdf/01-virtualarm.urdf"/>
+  <param name="robot_description" command="$(find xacro)/xacro $(arg model)" />
+
   <include file="$(find realsense2_camera)/launch/rs_aligned_depth.launch" />
   <node pkg="pepper_surrogate" type="stereo_camera_node.py" name="stero_camera_node"/>
   <node pkg="pepper_surrogate" type="head_control_node" name="head_control_node"/>

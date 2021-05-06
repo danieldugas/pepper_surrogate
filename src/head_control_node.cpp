@@ -1,9 +1,11 @@
+#include "tf/LinearMath/Quaternion.h"
+#include "tf/LinearMath/Transform.h"
+#include "tf/transform_datatypes.h"
 #include <string>
 #include <vector>
 #include <cmath>
 #include <algorithm>
 
-#include <tf2/LinearMath/Quaternion.h>
 #include <tf2/LinearMath/Matrix3x3.h>
 #include <tf2_ros/transform_broadcaster.h>
 #include <tf2_ros/transform_listener.h>
@@ -16,7 +18,7 @@
 #include <naoqi_bridge_msgs/JointAnglesWithSpeed.h>
 #include <pepper_surrogate/ButtonToggle.h>
 
-#include <tf2_eigen/tf2_eigen.h>
+#include <tf_conversions/tf_eigen.h>
 #include <openhmd.h>
 #include <assert.h>
 #include <stdio.h>
@@ -32,7 +34,7 @@ double constrainAngle(double x){
     return x - M_PI;
 }
 
-bool quaternionIsUnit(tf2::Quaternion q) {
+bool quaternionIsUnit(tf::Quaternion q) {
   return std::abs(
       (q.x() * q.x() +
        q.y() * q.y() +
@@ -257,14 +259,14 @@ class OculusHeadController {
 
       float f[16];
       ohmd_device_getf(hmd_, OHMD_ROTATION_QUAT, f);
-      tf2::Quaternion q(f[0], f[1], f[2], f[3]);
-      tf2::Vector3 v(0., 0., 0.);
-      tf2::Quaternion new_q;
-      tf2::Vector3 new_v;
-      oculusToROSFrameRotation(q, v, new_q, new_v);
-      sendTransform(ros::Time::now(), kOdomFrame, kVRRoomFrame, tf2::Vector3(0., 0., 1.), tf2::Quaternion::getIdentity());
-      sendTransform(ros::Time::now(), kVRRoomFrame, kHMDFrame, tf2::Vector3(0., 0., 1.), new_q);
-      sendHeadTrackingJointAngles(new_q);
+      tf::Quaternion q(f[0], f[1], f[2], f[3]);
+      tf::Vector3 v(0., 0., 0.);
+      tf::Transform t(q, v);
+      tf::Transform new_t = oculusToROSFrameRotation(t);
+      q = new_t.getRotation();
+      sendTransform(ros::Time::now(), kOdomFrame, kVRRoomFrame, tf::Vector3(0., 0., 1.), tf::Quaternion::getIdentity());
+      sendTransform(ros::Time::now(), kVRRoomFrame, kHMDFrame, tf::Vector3(0., 0., 1.), q);
+      sendHeadTrackingJointAngles(q);
 
 
       // ---------------------
@@ -290,19 +292,20 @@ class OculusHeadController {
 
           float f[16];
           ohmd_device_getf(ctr, OHMD_ROTATION_QUAT, f);
-          tf2::Quaternion q(f[0], f[1], f[2], f[3]);
+          tf::Quaternion q(f[0], f[1], f[2], f[3]);
 
           ohmd_device_getf(ctr, OHMD_POSITION_VECTOR, f);
-          tf2::Vector3 v(f[0], f[1], f[2]);
+          tf::Vector3 v(f[0], f[1], f[2]);
 
           if (!quaternionIsUnit(q)) {
             ROS_WARN_ONCE("Invalid quaternion for right controller. Waiting for correct value.");
           } else {
 
-            tf2::Quaternion new_q;
-            tf2::Vector3 new_v;
-            oculusToROSFrameRotation(q, v, new_q, new_v);
-            sendTransform(ros::Time::now(), kVRRoomFrame, ctr_frame, new_v, new_q);
+            tf::Transform t(q, v);
+            tf::Transform new_t = oculusToROSFrameRotation(t);
+            q = new_t.getRotation();
+            v = new_t.getOrigin();
+            sendTransform(ros::Time::now(), kVRRoomFrame, ctr_frame, v, q);
           }
 
           // buttons state
@@ -368,19 +371,19 @@ class OculusHeadController {
 
     // tracks oculus pose with pepper head, by sending the appropriate joint angles
     // q: oculus 3dof pose in vrroom frame
-    void sendHeadTrackingJointAngles(tf2::Quaternion q) {
+    void sendHeadTrackingJointAngles(tf::Quaternion q) {
       // oculus pose as euler angles in world frame
       double oculus_roll, oculus_pitch, oculus_yaw;
-      tf2::Matrix3x3(q).getRPY(oculus_roll, oculus_pitch, oculus_yaw);
+      tf::Matrix3x3(q).getRPY(oculus_roll, oculus_pitch, oculus_yaw);
 
       // pepper yaw in world frame (a.k.a oculus in base_footprint tf - rot only)
       double pepper_roll, pepper_pitch, pepper_yaw;
-      tf2::Quaternion qpepper_in_world(
+      tf::Quaternion qpepper_in_world(
           pepper_in_world_.transform.rotation.x,
           pepper_in_world_.transform.rotation.y,
           pepper_in_world_.transform.rotation.z,
           pepper_in_world_.transform.rotation.w);
-      tf2::Matrix3x3(qpepper_in_world).getRPY(pepper_roll, pepper_pitch, pepper_yaw);
+      tf::Matrix3x3(qpepper_in_world).getRPY(pepper_roll, pepper_pitch, pepper_yaw);
       // we only care about yaw (assume base_footprint is horizontal)
       // TODO: check that base_footprint and vrroom (odom) z axis are aligned?
       double relative_yaw = constrainAngle(oculus_yaw - pepper_yaw);
@@ -411,7 +414,7 @@ class OculusHeadController {
       }
     }
 
-    void sendTransform(ros::Time time, std::string parent, std::string child, tf2::Vector3 v, tf2::Quaternion q) {
+    void sendTransform(ros::Time time, std::string parent, std::string child, tf::Vector3 v, tf::Quaternion q) {
         geometry_msgs::TransformStamped transformStamped;
         transformStamped.header.stamp = time;
         transformStamped.header.frame_id = parent;
@@ -426,27 +429,19 @@ class OculusHeadController {
         br_.sendTransform(transformStamped);
     }
 
-    void oculusToROSFrameRotation(tf2::Quaternion q, tf2::Vector3 v, tf2::Quaternion& new_q, tf2::Vector3& new_v) {
+    tf::Transform oculusToROSFrameRotation(tf::Transform t) {
         // qrotx and qrotz make the z axis point up in the oculus frame
         // qtilt makes the headset point up in the oculus frame
-        tf2::Quaternion qtilt, qrotx, qrotz;
+        tf::Quaternion qtilt, qrotx, qrotz;
         qtilt.setRPY(3.14159/2., 0.0, 0.0);
         qrotx.setRPY(-3.14159/2., 0.0, 0.0);
         qrotz.setRPY(0.0, 0.0, 3.14159/2.);
+        tf::Transform ttilt(qtilt);
+        tf::Transform trotx(qrotx);
+        tf::Transform trotz(qrotz);
         // This is the same as creating a world to qtilt tf with qtilt as rot, (rotates the actual oculus frame)
         // then a qtilt to oculus tf with q * qrotx * qrotz as tf (rotates the axes around the oculus)
-//         new_q = qtilt * q * qrotx * qrotz;
-        Eigen::Translation3d ev;
-        tf2::convert(v, ev);
-        Eigen::Quaterniond eq, eqtilt, eqrotx, eqrotz;
-        tf2::convert(q, eq);
-        tf2::convert(qtilt, eqtilt);
-        tf2::convert(qrotx, eqrotx);
-        tf2::convert(qrotz, eqrotz);
-        Eigen::Affine3d in = eq * ev;
-        Eigen::Affine3d out = eqtilt * in * eqrotx * eqrotz;
-        tf2::convert(out, new_q);
-        tf2::convert(out, new_v);
+        return ttilt * t * trotx * trotz;
     }
 
   private:

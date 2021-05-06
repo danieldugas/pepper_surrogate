@@ -83,11 +83,11 @@ class VirtualArm:
         self.scale = 1. # makes the virtual robot arm bigger to correspond with human size
         self.side = side
         # variables
-        self.se3_virtual_shoulder_in_vrroom = None
+        self.se3_virtual_torso_in_vrroom = None
 
     def initialize_from_zero_pose_forward_kinematics(self, se3_controller_in_vrroom, tf_br):
         """ We know the angles for pepper's arms in zero pose.
-        apply those from the controller position to get the shoulder position
+        apply those from the controller position to get the torso position
 
         Notes:
         - use gravity to correct wrist rotation error
@@ -95,12 +95,12 @@ class VirtualArm:
         """
         self.joint_angles = right_arm_zero_pose.values()
         # forward kinematics
-        se3_virtual_claw_in_virtual_shoulder = se3_from_pos_rot3(
+        se3_virtual_claw_in_virtual_torso = se3_from_pos_rot3(
             *pk.right_arm_get_position(self.joint_angles))
-        se3_virtual_shoulder_in_virtual_claw = se3.inverse_matrix(se3_virtual_claw_in_virtual_shoulder)
-        # assume hand and claw are in the same place (user did a good job) to find virtual shoulder estimate
+        se3_virtual_torso_in_virtual_claw = se3.inverse_matrix(se3_virtual_claw_in_virtual_torso)
+        # assume hand and claw are in the same place (user did a good job) to find virtual torso estimate
         # TODO: actual rotation of controller is not same as virtual claw. correct
-        #       gravity align shoulder frame in vrroom frame to correct error
+        #       gravity align torso frame in vrroom frame to correct error
         # TODO: actual scale is not the same. correct
         se3_virtual_claw_in_vrhand = se3.identity_matrix()
         if True:
@@ -139,19 +139,19 @@ class VirtualArm:
             t = TransformStamped()
             t.header.stamp = time
             t.header.frame_id = "dbg_virtual_claw"
-            t.child_frame_id = "dbg_virtualarm_shoulder"
-            p = se3.translation_from_matrix(se3.inverse_matrix(se3_virtual_claw_in_virtual_shoulder))
+            t.child_frame_id = "dbg_virtualarm_torso"
+            p = se3.translation_from_matrix(se3.inverse_matrix(se3_virtual_claw_in_virtual_torso))
             t.transform.translation.x = p[0]
             t.transform.translation.y = p[1]
             t.transform.translation.z = p[2]
-            q = se3.quaternion_from_matrix(se3.inverse_matrix(se3_virtual_claw_in_virtual_shoulder))
+            q = se3.quaternion_from_matrix(se3.inverse_matrix(se3_virtual_claw_in_virtual_torso))
             t.transform.rotation.x = q[0]
             t.transform.rotation.y = q[1]
             t.transform.rotation.z = q[2]
             t.transform.rotation.w = q[3]
             tf_br.sendTransform(t)
-        # compose tfs to get virtual shoulder in vrroom
-        # vrroom -> controller -> vrhand -> virtual_claw -> virtual_shoulder
+        # compose tfs to get virtual torso in vrroom
+        # vrroom -> controller -> vrhand -> virtual_claw -> virtual_torso
         se3_vrhand_in_vrroom = np.dot(
             se3_controller_in_vrroom,
             se3_vrhand_in_controller
@@ -160,23 +160,23 @@ class VirtualArm:
             se3_vrhand_in_vrroom,
             se3_virtual_claw_in_vrhand
         )
-        se3_virtual_shoulder_in_vrroom = np.dot(
+        se3_virtual_torso_in_vrroom = np.dot(
             se3_virtual_claw_in_vrroom,
-            se3_virtual_shoulder_in_virtual_claw
+            se3_virtual_torso_in_virtual_claw
         )
-        self.se3_virtual_shoulder_in_vrroom = se3_virtual_shoulder_in_vrroom
+        self.se3_virtual_torso_in_vrroom = se3_virtual_torso_in_vrroom
 
     def update(self, se3_controller_in_vrroom):
         """
-        controller has moved in virtual shoulder frame, move the virtual hand the same amount and get
+        controller has moved in virtual torso frame, move the virtual hand the same amount and get
         new joint angles
 
         Notes:
-        - use headset movement to infer shoulder drift
+        - use headset movement to infer torso drift
         """
-        # compose tfs to get virtual_claw in virtual_shoulder
+        # compose tfs to get virtual_claw in virtual_torso
         # vrroom -> controller -> vrhand -> virtual_claw
-        # vrroom -> virtual_shoulder
+        # vrroom -> virtual_torso
         se3_vrhand_in_vrroom = np.dot(
             se3_controller_in_vrroom,
             se3_vrhand_in_controller
@@ -186,13 +186,13 @@ class VirtualArm:
             se3_vrhand_in_vrroom,
             se3_virtual_claw_in_vrhand
         )
-        se3_vrroom_in_virtual_shoulder = se3.inverse_matrix(self.se3_virtual_shoulder_in_vrroom)
-        se3_virtual_claw_in_virtual_shoulder = np.dot(
-            se3_vrroom_in_virtual_shoulder,
+        se3_vrroom_in_virtual_torso = se3.inverse_matrix(self.se3_virtual_torso_in_vrroom)
+        se3_virtual_claw_in_virtual_torso = np.dot(
+            se3_vrroom_in_virtual_torso,
             se3_virtual_claw_in_vrroom,
         )
-        new_pos = se3.translation_from_matrix(se3_virtual_claw_in_virtual_shoulder)
-        new_rot = se3_virtual_claw_in_virtual_shoulder[:3, :3]
+        new_pos = se3.translation_from_matrix(se3_virtual_claw_in_virtual_torso)
+        new_rot = se3_virtual_claw_in_virtual_torso[:3, :3]
         new_angles = pk.right_arm_set_position(self.joint_angles, new_pos, new_rot, epsilon = 0.1)
         if new_angles is not None:
             self.joint_angles = new_angles
@@ -200,15 +200,15 @@ class VirtualArm:
     def visualize(self, tf_br):
         """ show the virtual arm in rviz
         """
-        joint_frames = ["1", "2", "3", "4", "5", "6"]
+        joint_frames = ["RShoulder", "RBicep", "RElbow", "RForeArm", "r_wrist", "RHand"]
         # get position, orientation for every joint in arm
-        pos_in_shoulder, ori_in_shoulder = pk.right_arm_get_position(self.joint_angles, full_pos=True)
+        pos_in_torso, ori_in_torso = pk.right_arm_get_position(self.joint_angles, full_pos=True)
         time = rospy.Time.now()
         # publish tfs
-        for pos, rot, frame in zip(pos_in_shoulder, ori_in_shoulder, joint_frames):
+        for pos, rot, frame in zip(pos_in_torso, ori_in_torso, joint_frames):
             t = TransformStamped()
             t.header.stamp = time
-            t.header.frame_id = "virtualarm_shoulder"
+            t.header.frame_id = "virtualarm_RTorso"
             t.child_frame_id = "virtualarm_" + frame
             t.transform.translation.x = pos[0]
             t.transform.translation.y = pos[1]
@@ -219,16 +219,16 @@ class VirtualArm:
             t.transform.rotation.z = q[2]
             t.transform.rotation.w = q[3]
             tf_br.sendTransform(t)
-        # publish shoulder in vrroom
+        # publish torso in vrroom
         t = TransformStamped()
         t.header.stamp = time
         t.header.frame_id = kVRRoomFrame
-        t.child_frame_id = "virtualarm_shoulder"
-        pos = se3.translation_from_matrix(self.se3_virtual_shoulder_in_vrroom)
+        t.child_frame_id = "virtualarm_RTorso"
+        pos = se3.translation_from_matrix(self.se3_virtual_torso_in_vrroom)
         t.transform.translation.x = pos[0]
         t.transform.translation.y = pos[1]
         t.transform.translation.z = pos[2]
-        q = se3.quaternion_from_matrix(self.se3_virtual_shoulder_in_vrroom)
+        q = se3.quaternion_from_matrix(self.se3_virtual_torso_in_vrroom)
         t.transform.rotation.x = q[0]
         t.transform.rotation.y = q[1]
         t.transform.rotation.z = q[2]
