@@ -112,6 +112,9 @@ class OculusHeadController {
       kRCtrFrame = "oculus_right_controller";
       kBaseLinkFrame = "base_footprint";
 
+      // Parameters
+      nh_.param<int>("verbosity", verbosity_, 0);
+
       // Publishers and subscribers.
       pose_pub_ = nh_.advertise<naoqi_bridge_msgs::JointAnglesWithSpeed>(kPepperPoseTopic, 1);
       button_a_pub_ = nh_.advertise<pepper_surrogate::ButtonToggle>(kButtonATopic, 1);
@@ -254,8 +257,10 @@ class OculusHeadController {
       ohmd_ctx_update(ctx_);
 
       // get rotation and position
-      print_infof(hmd_, "rotation quat:", 4, OHMD_ROTATION_QUAT);
-      print_infof(hmd_, "position vec: ", 3, OHMD_POSITION_VECTOR);
+      if (verbosity_ >= 1) {
+        print_infof(hmd_, "rotation quat:", 4, OHMD_ROTATION_QUAT);
+        print_infof(hmd_, "position vec: ", 3, OHMD_POSITION_VECTOR);
+      }
 
       float f[16];
       ohmd_device_getf(hmd_, OHMD_ROTATION_QUAT, f);
@@ -328,24 +333,26 @@ class OculusHeadController {
             ohmd_device_getf(ctr, OHMD_CONTROLS_STATE, control_state);
 
             // DEBUG
-            printf("%-25s", "controls:");
-            for(int i = 0; i < control_count; i++){
-              printf("%s (%s)%s", controls_fn_str[controls_fn[i]], controls_type_str[controls_types[i]], i == hmd_control_count_ - 1 ? "" : ", ");
+            if (verbosity_ >= 1) {
+              printf("%-25s", "controls:");
+              for(int i = 0; i < control_count; i++){
+                printf("%s (%s)%s", controls_fn_str[controls_fn[i]], controls_type_str[controls_types[i]], i == hmd_control_count_ - 1 ? "" : ", ");
+              }
+              printf("\n");
+              printf("%-25s", "controls state:");
+              for(int i = 0; i < control_count; i++)
+              {
+                printf("%f ", control_state[i]);
+              }
+              printf("\n");
+              printf("%-25s", "prev controls state:");
+              for(int i = 0; i < control_count; i++)
+              {
+                printf("%f ", prev_control_state[i]);
+              }
+              printf("\n");
+              printf("\n\n");
             }
-            printf("\n");
-            printf("%-25s", "controls state:");
-            for(int i = 0; i < control_count; i++)
-            {
-              printf("%f ", control_state[i]);
-            }
-            printf("\n");
-            printf("%-25s", "prev controls state:");
-            for(int i = 0; i < control_count; i++)
-            {
-              printf("%f ", prev_control_state[i]);
-            }
-            printf("\n");
-            printf("\n\n");
 
             for(int i = 0; i < control_count; i++){
               bool is_toggled = false;
@@ -463,6 +470,7 @@ class OculusHeadController {
     std::string kHMDFrame;
     std::string kLCtrFrame;
     std::string kRCtrFrame;
+    int verbosity_;
 
     bool controllers_disabled_;
     ohmd_context* ctx_;

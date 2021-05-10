@@ -4,18 +4,9 @@ from scipy import linalg
 
 import forward_kinematics as fk
 import inverse_kinematics as ik
+from joint_definitions import left_arm_tags, left_arm_initial_pose, right_arm_tags, right_arm_initial_pose
 
-right_arm_tags = ["RShoulderPitch", "RShoulderRoll", "RElbowYaw", "RElbowRoll", "RWristYaw"]
-right_arm_initial_pose = [1.0, -0.2, 1.57-0.2, 1.0, -1.57]
-right_arm_work_pose = [0.8, -0.2, 1.57-0.2, 0.9, -1.57]
 
-_inverse_case = [1.0, -1.0, -1.0, -1.0, -1.0]
-
-left_arm_tags = ["LShoulderPitch", "LShoulderRoll", "LElbowYaw", "LElbowRoll", "LWristYaw"]
-left_arm_initial_pose = [p[0] * p[1] for p in zip(right_arm_initial_pose, _inverse_case)]
-left_arm_work_pose = [p[0] * p[1] for p in zip(right_arm_work_pose, _inverse_case)]
-
-    
 def right_arm_get_position(angles, full_pos=False):
     """
     Just calculate the position when joints on the pepper's right arm is in given positions
@@ -62,4 +53,9 @@ def right_arm_set_position(angles, target_pos, target_ori, epsilon=0.0001):
 def left_arm_set_position(angles, target_pos, target_ori, epsilon = 0.0001):
     return ik.calc_inv_pos(angles, target_pos, target_ori, epsilon, right=False)
 
+def left_arm_ik_single_iteration(initial_angles, target_pos, target_ori):
+    return ik.single_step_towards_target(initial_angles, target_pos, target_ori, right=False)
+
+def right_arm_ik_single_iteration(initial_angles, target_pos, target_ori):
+    return ik.single_step_towards_target(initial_angles, target_pos, target_ori, right=True)
 

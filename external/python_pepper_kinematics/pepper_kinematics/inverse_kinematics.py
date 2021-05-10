@@ -4,6 +4,7 @@ import scipy as sp
 from scipy import linalg
 
 import forward_kinematics as fk
+from joint_definitions import clamp_joints
 
 def calc_inv_pos(angles, target_pos, target_ori, epsilon, right=True):
     p  = np.array([0,0,0,1])
@@ -29,6 +30,23 @@ def calc_inv_pos(angles, target_pos, target_ori, epsilon, right=True):
         sum_old = sum
     if i == MAX_ITER - 1:
         print("Max number of iterations reached!")
+    return angs
+
+def single_step_towards_target(angles, target_pos, target_ori, right=True):
+    angs = np.array(angles)
+    pos, ori, j = fk.calc_fk_and_jacob(angs, jacob=True, right=right)
+    # follow jacobian towards new joint limits
+    J = _calc_invJ(j)
+    delta_pos = np.matrix((target_pos-pos)[0:3]).transpose()
+    delta_angs = (J * delta_pos).transpose()
+    angs = np.squeeze(np.asarray(delta_angs)) + angs
+    # respect joint limits
+    angs = clamp_joints(angs, right=right)
+    # did we get closer to desired? if not, singularity, return no movement
+    new_pos, new_ori = fk.calc_fk_and_jacob(angs, jacob=False, right=right)
+    if np.linalg.norm(new_pos-target_pos) > np.linalg.norm(pos-target_pos):
+        return np.array(angles)
+    # return new angles
     return angs
 
 def _calc_invJ(J, epsilon = 0.01):

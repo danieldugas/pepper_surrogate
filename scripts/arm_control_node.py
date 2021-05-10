@@ -143,10 +143,12 @@ class VirtualArm:
         """
         # left vs right functions and constants
         if self.side == "right":
-            arm_set_position = pk.right_arm_set_position
+#             arm_set_position = pk.right_arm_set_position
+            arm_ik_single_iteration = pk.right_arm_ik_single_iteration
             se3_vrhand_in_controller = se3_right_vrhand_in_controller
         else:
-            arm_set_position = pk.left_arm_set_position
+#             arm_set_position = pk.left_arm_set_position
+            arm_ik_single_iteration = pk.left_arm_ik_single_iteration
             se3_vrhand_in_controller = se3_left_vrhand_in_controller
         # compose tfs to get virtual_claw in virtual_torso
         # vrroom -> controller -> vrhand -> virtual_claw
@@ -167,7 +169,8 @@ class VirtualArm:
         )
         new_pos = se3.translation_from_matrix(se3_virtual_claw_in_virtual_torso)
         new_rot = se3_virtual_claw_in_virtual_torso[:3, :3]
-        new_angles = arm_set_position(self.joint_angles, new_pos, new_rot, epsilon = 0.1)
+#         new_angles = arm_set_position(self.joint_angles, new_pos, new_rot, epsilon = 0.1)
+        new_angles = arm_ik_single_iteration(self.joint_angles, new_pos, new_rot)
         if new_angles is not None:
             self.joint_angles = new_angles
 
@@ -302,8 +305,10 @@ class ArmControlNode:
 
             # update virtual arm angles
             if self.current_state in ["tracking", "trackingactive"]:
-                self.virtual_arms[side].update(se3_controller_in_vrroom)
-                self.virtual_arms[side].visualize(self.tf_br)
+                # sometimes one arm did not get zeroed (controller not tracked). Tolerated for debug reasons
+                if self.virtual_arms[side] is not None:
+                    self.virtual_arms[side].update(se3_controller_in_vrroom)
+                    self.virtual_arms[side].visualize(self.tf_br)
 
             # get virtual arm joint angles, publish them
             if self.current_state == "trackingactive":
