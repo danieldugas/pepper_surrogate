@@ -12,8 +12,20 @@ from geometry_msgs.msg import TransformStamped
 import pepper_kinematics as pk
 
 # all angles in radians
-left_arm_rest_pose = {tag: angle for (tag, angle) in zip(pk.left_arm_tags, pk.left_arm_initial_pose)}
-right_arm_rest_pose = {tag: angle for (tag, angle) in zip(pk.right_arm_tags, pk.right_arm_initial_pose)}
+left_arm_rest_pose = {
+    'LShoulderPitch': 1.5,
+    'LShoulderRoll': 0.,
+    'LElbowYaw': 0.,
+    'LElbowRoll': -0.,
+    'LWristYaw': -1.,
+}
+right_arm_rest_pose = {
+    'RShoulderPitch': 1.5,
+    'RShoulderRoll': -0.,
+    'RElbowYaw': 0.,
+    'RElbowRoll': 0.,
+    'RWristYaw': 1.,
+}
 left_arm_zero_pose = {
     'LShoulderPitch': 0.,
     'LShoulderRoll': 0.3,
@@ -32,6 +44,7 @@ right_arm_zero_pose = {
 kVRRoomFrame = "vrroom"
 kRightControllerFrame = "oculus_right_controller"
 kLeftControllerFrame = "oculus_left_controller"
+kMaxArmSpeedRadPerSec = 0.1
 
 # controller frame != pepper hand frame even if the hands are superposed!
 # find static transformation between controller frame and pepper hand if it was holding the controller
@@ -84,18 +97,19 @@ class VirtualArm:
     to pepper control """
     def __init__(self, side="right"):
         # parameters
-        self.scale = 1. # makes the virtual robot arm bigger to correspond with human size
         self.side = side
         # variables
         self.se3_virtual_torso_in_vrroom = None
+        # constants
+        self.joint_names = pk.right_arm_tags if side == "right" else pk.left_arm_tags
 
     def initialize_from_zero_pose_forward_kinematics(self, se3_controller_in_vrroom, tf_br):
         """ We know the angles for pepper's arms in zero pose.
         apply those from the controller position to get the torso position
 
         Notes:
-        - use gravity to correct wrist rotation error
-        - use hand-eye transform and claw-camera transform to infer scale
+        - TODO? use gravity to correct wrist rotation error
+        - TODO? use hand-eye transform and claw-camera transform to infer scale
         """
         # left vs right functions and constants
         if self.side == "right":
@@ -113,9 +127,6 @@ class VirtualArm:
             *arm_get_position(self.joint_angles))
         se3_virtual_torso_in_virtual_claw = se3.inverse_matrix(se3_virtual_claw_in_virtual_torso)
         # assume hand and claw are in the same place (user did a good job) to find virtual torso estimate
-        # TODO: actual rotation of controller is not same as virtual claw. correct
-        #       gravity align torso frame in vrroom frame to correct error
-        # TODO: actual scale is not the same. correct
         se3_virtual_claw_in_vrhand = se3.identity_matrix()
         # compose tfs to get virtual torso in vrroom
         # vrroom -> controller -> vrhand -> virtual_claw -> virtual_torso
@@ -236,7 +247,7 @@ class ArmControlNode:
         self.current_state = "idle"
 
         # publishers
-        self.joint_pub = rospy.Publisher("/pepper_robot/pose/joint_angles", JointAnglesWithSpeed, queue_size=1)
+        self.joint_angles_pub = rospy.Publisher("/pepper_robot/pose/joint_angles", JointAnglesWithSpeed, queue_size=1)
         self.tf_br = tf2_ros.TransformBroadcaster()
 
         # tf listener
@@ -248,7 +259,8 @@ class ArmControlNode:
         rospy.Subscriber("/oculus/button_b_toggle", ButtonToggle, self.zeroswitch_toggle_callback)
 
         # Timer
-        rospy.Timer(rospy.Duration(0.01), self.arm_controller_routine)
+        rospy.Timer(rospy.Duration(0.01), self.arm_update_routine)
+        rospy.Timer(rospy.Duration(0.1), self.arm_control_routine)
 
     def is_zero_pose_reached(self):
         return True
@@ -286,7 +298,7 @@ class ArmControlNode:
         t.transform.rotation.w = q[3]
         self.tf_br.sendTransform(t)
 
-    def arm_controller_routine(self, event=None):
+    def arm_update_routine(self, event=None):
         # show vrhand
         self.visualize_vrhands()
 
@@ -310,18 +322,52 @@ class ArmControlNode:
                     self.virtual_arms[side].update(se3_controller_in_vrroom)
                     self.virtual_arms[side].visualize(self.tf_br)
 
-            # get virtual arm joint angles, publish them
-            if self.current_state == "trackingactive":
-                pass
-
             if self.current_state == "zero":
                 # create new temporary virtual arm and display it
-                # when comfirm button is pressed the temporary arm will become permanent and joints unlocked
-                # debug: visualize virtual arm before confirm button is pressed
+                # when confirm button is pressed the temporary arm will become permanent and joints unlocked
                 self.virtual_arms[side] = VirtualArm(side=side)
                 self.virtual_arms[side].initialize_from_zero_pose_forward_kinematics(se3_controller_in_vrroom, self.tf_br)
                 self.virtual_arms[side].visualize(self.tf_br)
 
+    def arm_control_routine(self, event=None):
+        # get both virtual arms joint angles, publish them
+        if self.current_state == "trackingactive":
+            joint_names = []
+            joint_angles = []
+            for side in ["right", "left"]:
+                if self.virtual_arms[side] is not None:
+                    joint_names.extend(self.virtual_arms[side].joint_names)
+                    joint_angles.extend(self.virtual_arms[side].joint_angles)
+            if joint_angles:
+                joint_angles_msg = JointAnglesWithSpeed()
+                joint_angles_msg.speed = kMaxArmSpeedRadPerSec
+                joint_angles_msg.joint_names = joint_names
+                joint_angles_msg.joint_angles = joint_angles
+                self.joint_angles_pub.publish(joint_angles_msg)
+        if self.current_state == "zero":
+            joint_names = []
+            joint_angles = []
+            joint_names.extend(left_arm_zero_pose.keys())
+            joint_angles.extend(left_arm_zero_pose.values())
+            joint_names.extend(right_arm_zero_pose.keys())
+            joint_angles.extend(right_arm_zero_pose.values())
+            joint_angles_msg = JointAnglesWithSpeed()
+            joint_angles_msg.speed = kMaxArmSpeedRadPerSec
+            joint_angles_msg.joint_names = joint_names
+            joint_angles_msg.joint_angles = joint_angles
+            self.joint_angles_pub.publish(joint_angles_msg)
+        if self.current_state == "idle":
+            joint_names = []
+            joint_angles = []
+            joint_names.extend(left_arm_rest_pose.keys())
+            joint_angles.extend(left_arm_rest_pose.values())
+            joint_names.extend(right_arm_rest_pose.keys())
+            joint_angles.extend(right_arm_rest_pose.values())
+            joint_angles_msg = JointAnglesWithSpeed()
+            joint_angles_msg.speed = kMaxArmSpeedRadPerSec
+            joint_angles_msg.joint_names = joint_names
+            joint_angles_msg.joint_angles = joint_angles
+            self.joint_angles_pub.publish(joint_angles_msg)
 
     def zeroswitch_toggle_callback(self, msg):
         if msg.event == ButtonToggle.PRESSED:

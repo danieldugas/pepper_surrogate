@@ -111,6 +111,10 @@ class OculusHeadController {
       kLCtrFrame = "oculus_left_controller";
       kRCtrFrame = "oculus_right_controller";
       kBaseLinkFrame = "base_footprint";
+      kPosVrInOdom = tf::Vector3(0., 0., 0.1); // slight difference to distinguish them in rviz
+
+      // Variables
+      rot_vr_in_odom_ = tf::Quaternion::getIdentity();
 
       // Parameters
       nh_.param<int>("verbosity", verbosity_, 0);
@@ -268,11 +272,15 @@ class OculusHeadController {
       ohmd_device_getf(hmd_, OHMD_POSITION_VECTOR, f);
       tf::Vector3 v(f[0], f[1], f[2]);
       tf::Transform new_t = oculusToROSFrameRotation(tf::Transform(q, v));
-      q = new_t.getRotation();
-      v = new_t.getOrigin();
-      sendTransform(ros::Time::now(), kOdomFrame, kVRRoomFrame, tf::Vector3(0., 0., 0.1), tf::Quaternion::getIdentity());
-      sendTransform(ros::Time::now(), kVRRoomFrame, kHMDFrame, v, q);
-      sendHeadTrackingJointAngles(q);
+      tf::Quaternion q_HMD_in_vrroom = new_t.getRotation();
+      tf::Vector3 pos_HMD_in_vrroom = new_t.getOrigin();
+      sendTransform(ros::Time::now(), kOdomFrame, kVRRoomFrame, kPosVrInOdom, rot_vr_in_odom_);
+      sendTransform(ros::Time::now(), kVRRoomFrame, kHMDFrame, pos_HMD_in_vrroom, q_HMD_in_vrroom);
+      double roll, pitch, yaw;
+      getOculusInPepperRPY(q_HMD_in_vrroom, roll, pitch, yaw);
+      sendHeadTrackingJointAngles(pitch, yaw);
+
+      double yaw_oculus_in_base_footprint = yaw;
 
 
       // ---------------------
@@ -368,6 +376,10 @@ class OculusHeadController {
                 pepper_surrogate::ButtonToggle msg;
                 msg.event = (control_state[i] ?  msg.PRESSED : msg.RELEASED);
                 button_b_pub_.publish(msg);
+              } else if (strcmp(controls_fn_str[controls_fn[i]], "button-x") == 0 && is_toggled) {
+                if (control_state[i]) {
+                  resetHeadYaw(yaw_oculus_in_base_footprint);
+                }
               }
             }
 
@@ -377,9 +389,9 @@ class OculusHeadController {
       } // if controllers enabled
     }
 
-    // tracks oculus pose with pepper head, by sending the appropriate joint angles
+    // returns the roll, pitch, yaw of oculus in base_footprint frame
     // q: oculus 3dof pose in vrroom frame
-    void sendHeadTrackingJointAngles(tf::Quaternion q) {
+    void getOculusInPepperRPY(tf::Quaternion q, double& roll, double& pitch, double& yaw) {
       // oculus pose as euler angles in world frame
       double oculus_roll, oculus_pitch, oculus_yaw;
       tf::Matrix3x3(q).getRPY(oculus_roll, oculus_pitch, oculus_yaw);
@@ -392,9 +404,17 @@ class OculusHeadController {
           pepper_in_world_.transform.rotation.z,
           pepper_in_world_.transform.rotation.w);
       tf::Matrix3x3(qpepper_in_world).getRPY(pepper_roll, pepper_pitch, pepper_yaw);
-      // we only care about yaw (assume base_footprint is horizontal)
+      // yaw of oculus in base_footprint frame
       // TODO: check that base_footprint and vrroom (odom) z axis are aligned?
       double relative_yaw = constrainAngle(oculus_yaw - pepper_yaw);
+
+      roll = oculus_roll;
+      pitch = oculus_pitch;
+      yaw = relative_yaw;
+    }
+
+    // tracks oculus pose with pepper head, by sending the appropriate joint angles
+    void sendHeadTrackingJointAngles(double pitch, double yaw) {
 
       // Control pepper head to oculus pose
       // Pepper head has no roll axis, use hip?
@@ -414,9 +434,9 @@ class OculusHeadController {
         naoqi_bridge_msgs::JointAnglesWithSpeed joint_angles_msg;
         joint_angles_msg.speed = kMaxJointSpeedRadPerS;
         joint_angles_msg.joint_names.push_back(kHeadYawJointName);
-        joint_angles_msg.joint_angles.push_back(clip(relative_yaw, kMinHeadYawRad, kMaxHeadYawRad));
+        joint_angles_msg.joint_angles.push_back(clip(yaw, kMinHeadYawRad, kMaxHeadYawRad));
         joint_angles_msg.joint_names.push_back(kHeadPitchJointName);
-        joint_angles_msg.joint_angles.push_back(clip(oculus_pitch, kMinHeadPitchRad, kMaxHeadPitchRad));
+        joint_angles_msg.joint_angles.push_back(clip(pitch, kMinHeadPitchRad, kMaxHeadPitchRad));
         pose_pub_.publish(joint_angles_msg);
         pose_pub_last_publish_time_ = ros::Time::now();
       }
@@ -452,6 +472,15 @@ class OculusHeadController {
         return ttilt * t * trotx * trotz;
     }
 
+    // yaw: yaw of oculus in base_footprint
+    void resetHeadYaw(double yaw) {
+      // get current yaw
+      double vrroll, vrpitch, vryaw;
+      tf::Matrix3x3(rot_vr_in_odom_).getRPY(vrroll, vrpitch, vryaw);
+      // set relative yaw to 0 by rotating vrroom in odom
+      rot_vr_in_odom_.setRPY(0., 0., vryaw-yaw);
+    }
+
   private:
     ros::NodeHandle& nh_;
     ros::Timer pose_timer_;
@@ -471,6 +500,8 @@ class OculusHeadController {
     std::string kLCtrFrame;
     std::string kRCtrFrame;
     int verbosity_;
+    tf::Quaternion rot_vr_in_odom_;
+    tf::Vector3 kPosVrInOdom;
 
     bool controllers_disabled_;
     ohmd_context* ctx_;
