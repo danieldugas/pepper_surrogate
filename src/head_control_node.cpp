@@ -114,7 +114,8 @@ class OculusHeadController {
       kPosVrInOdom = tf::Vector3(0., 0., 0.1); // slight difference to distinguish them in rviz
 
       // Variables
-      rot_vr_in_odom_ = tf::Quaternion::getIdentity();
+      rot_vr_in_odom_ = tf::Quaternion(0., 0., 0., 1.);
+      known_pepper_in_vrroom_ = false;
 
       // Parameters
       nh_.param<int>("verbosity", verbosity_, 0);
@@ -249,7 +250,8 @@ class OculusHeadController {
 
     void gettfCallback(const ros::TimerEvent& e) {
       try{
-        pepper_in_world_ = tfBuffer_.lookupTransform(kVRRoomFrame, kBaseLinkFrame, ros::Time(0));
+        pepper_in_vrroom_ = tfBuffer_.lookupTransform(kVRRoomFrame, kBaseLinkFrame, ros::Time(0));
+        known_pepper_in_vrroom_ = true;
       }
       catch (tf2::TransformException &ex) {
         ROS_WARN_ONCE("%s",ex.what());
@@ -392,25 +394,30 @@ class OculusHeadController {
     // returns the roll, pitch, yaw of oculus in base_footprint frame
     // q: oculus 3dof pose in vrroom frame
     void getOculusInPepperRPY(tf::Quaternion q, double& roll, double& pitch, double& yaw) {
-      // oculus pose as euler angles in world frame
+      // oculus pose as euler angles in vrroom frame
       double oculus_roll, oculus_pitch, oculus_yaw;
       tf::Matrix3x3(q).getRPY(oculus_roll, oculus_pitch, oculus_yaw);
 
-      // pepper yaw in world frame (a.k.a oculus in base_footprint tf - rot only)
-      double pepper_roll, pepper_pitch, pepper_yaw;
-      tf::Quaternion qpepper_in_world(
-          pepper_in_world_.transform.rotation.x,
-          pepper_in_world_.transform.rotation.y,
-          pepper_in_world_.transform.rotation.z,
-          pepper_in_world_.transform.rotation.w);
-      tf::Matrix3x3(qpepper_in_world).getRPY(pepper_roll, pepper_pitch, pepper_yaw);
-      // yaw of oculus in base_footprint frame
-      // TODO: check that base_footprint and vrroom (odom) z axis are aligned?
-      double relative_yaw = constrainAngle(oculus_yaw - pepper_yaw);
-
       roll = oculus_roll;
       pitch = oculus_pitch;
-      yaw = relative_yaw;
+
+      if (known_pepper_in_vrroom_) {
+        // pepper yaw in vroom frame
+        double pepper_roll, pepper_pitch, pepper_yaw;
+        tf::Quaternion qpepper_in_vrroom(
+            pepper_in_vrroom_.transform.rotation.x,
+            pepper_in_vrroom_.transform.rotation.y,
+            pepper_in_vrroom_.transform.rotation.z,
+            pepper_in_vrroom_.transform.rotation.w);
+        tf::Matrix3x3(qpepper_in_vrroom).getRPY(pepper_roll, pepper_pitch, pepper_yaw);
+        // yaw of oculus in base_footprint frame
+        // TODO: check that base_footprint and vrroom (odom) z axis are aligned?
+        double relative_yaw = constrainAngle(oculus_yaw - pepper_yaw);
+        yaw = relative_yaw;
+      } else {
+        yaw = 0.;
+      }
+
     }
 
     // tracks oculus pose with pepper head, by sending the appropriate joint angles
@@ -457,6 +464,7 @@ class OculusHeadController {
         br_.sendTransform(transformStamped);
     }
 
+    // Avoids creating extra static tf frames between vrroom and oculus by applying tf directly
     tf::Transform oculusToROSFrameRotation(tf::Transform t) {
         // qrotx and qrotz make the z axis point up in the oculus frame
         // qtilt makes the headset point up in the oculus frame
@@ -492,7 +500,8 @@ class OculusHeadController {
     tf2_ros::TransformBroadcaster br_;
     tf2_ros::Buffer tfBuffer_;
     tf2_ros::TransformListener tfListener_;
-    geometry_msgs::TransformStamped pepper_in_world_;
+    geometry_msgs::TransformStamped pepper_in_vrroom_;
+    bool known_pepper_in_vrroom_;
     std::string kBaseLinkFrame;
     std::string kVRRoomFrame;
     std::string kOdomFrame;
