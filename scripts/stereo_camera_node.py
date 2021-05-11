@@ -25,7 +25,7 @@ class StereoCameraNode:
         # Subscribe for two "eyes"
         rospy.Subscriber("/camera/infra2/image_rect_raw", Image, self.r_img_callback)
         rospy.Subscriber("/camera/infra1/image_rect_raw", Image, self.l_img_callback)
-        rospy.Subscriber("/camera/infra1/image_rect_raw", Image, self.minimap_callback)
+        rospy.Subscriber("/camera/color/image_raw", Image, self.minimap_callback)
 
         self.stereo_publisher = rospy.Publisher("/openhmd/stereo", Image, queue_size=1000)
         self.cv_bridge = CvBridge()
@@ -49,14 +49,14 @@ class StereoCameraNode:
             cv_right_image = self.cv_bridge.imgmsg_to_cv2(self.r_img, desired_encoding="mono8")
             cv_left_image = self.cv_bridge.imgmsg_to_cv2(self.l_img, desired_encoding="mono8")
 
+            cv_right_image = self.lense_distort.process_frame(cv_right_image)
+            cv_left_image = self.lense_distort.process_frame(cv_left_image)
+
             # add minimap
             if self.minimap is not None:
                 cv_minimap = self.cv_bridge.imgmsg_to_cv2(self.minimap, desired_encoding="mono8")
-                cv_right_image[:64, :64] = cv_minimap[:64, :64]
-                cv_left_image[:64, :64] = cv_minimap[:64, :64]
-
-            cv_right_image = self.lense_distort.process_frame(cv_right_image)
-            cv_left_image = self.lense_distort.process_frame(cv_left_image)
+                cv_right_image[100:64+100, 100:64+100] = cv_minimap[::cv_minimap.shape[0] / 64, ::cv_minimap.shape[1] / 64][:64, :64]
+                cv_left_image[100:64+100, 20+100:64+20+100] = cv_minimap[::cv_minimap.shape[0] / 64, ::cv_minimap.shape[1] / 64][:64, :64]
 
             cv_stereo_image = np.append(cv_left_image, cv_right_image, axis=1)
             stereo_image = self.cv_bridge.cv2_to_imgmsg(cv_stereo_image, encoding="mono8")
