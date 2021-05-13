@@ -1,0 +1,19 @@
+<?xml version="1.0"?>
+<launch>
+
+  <include file="$(find asl_pepper_2d_simulator)/launch/pepper_2d_simulator.launch" >
+  </include>
+
+<!--   Minimap TODO: use refmap + map_matcher instead of gmapping -->
+  <include file="$(find asl_pepper_gmapping)/launch/gmapping.launch" >
+    <arg name="output" value="log"/>
+  </include>
+  <node pkg="pepper_surrogate" type="minimap_node.py" name="minimap_node">
+    <param name="reference_map_name" value="/sim_map"/>
+    <param name="reference_map_folder" value="rostopic"/>
+    <param name="reference_map_frame" value="sim_map"/>
+  </node>
+
+  <node type="rviz" name="rviz" pkg="rviz" args="-d $(env HOME)/.rviz/pepper_sim.rviz" />
+
+</launch>

@@ -1,4 +1,4 @@
-#!/usr/bin/python
+#!/usr/bin/env python
 
 # original code from h3ct0r/openhmd_ros
 

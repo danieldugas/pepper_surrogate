@@ -1,18 +1,35 @@
 <?xml version="1.0"?>
 <launch>
 
+<!--   URDF -->
   <arg name="virtualarm_model" default="$(find pepper_surrogate)/urdf/01-virtualarm.urdf"/>
   <param name="virtualarm_description" command="$(find xacro)/xacro $(arg virtualarm_model)" />
   <arg name="oculus_model" default="$(find pepper_surrogate)/urdf/02-oculus.urdf"/>
   <param name="oculus_description" command="$(find xacro)/xacro $(arg oculus_model)" />
 
+<!--   Oculus and Head Control -->
+  <node pkg="pepper_surrogate" type="head_control_node" name="head_control_node"/>
+
+<!--   Realsense -->
   <include file="$(find realsense2_camera)/launch/rs_aligned_depth.launch" />
   <node pkg="pepper_surrogate" type="stereo_camera_node.py" name="stereo_camera_node"/>
-  <node pkg="pepper_surrogate" type="head_control_node" name="head_control_node"/>
+
+<!--   Arm control -->
   <node pkg="pepper_surrogate" type="arm_control_node.py" name="arm_control_node"/>
+
+<!--   Minimap TODO: use refmap + map_matcher instead of gmapping -->
+  <include file="$(find asl_pepper_gmapping)/launch/gmapping.launch" >
+    <arg name="output" value="log"/>
+  </include>
+  <node pkg="pepper_surrogate" type="minimap_node.py" name="minimap_node">
+    <param name="reference_map_name" value="/gmap"/>
+    <param name="reference_map_folder" value="rostopic"/>
+    <param name="reference_map_frame" value="gmap"/>
+  </node>
 
   <node type="rviz" name="rviz" pkg="rviz" args="-d $(env HOME)/.rviz/oculus_surrogate.rviz" />
 
+<!--   Enable Oculus Viewport -->
   <node pkg="ros_run_command" type="ros_run_command" name="eval" output="screen"
     args="watch xrandr --output HDMI-2 --set non-desktop 0">
   </node>
