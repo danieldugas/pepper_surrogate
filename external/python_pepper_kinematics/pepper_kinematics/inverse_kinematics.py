@@ -32,9 +32,9 @@ def calc_inv_pos(angles, target_pos, target_ori, epsilon, right=True):
         print("Max number of iterations reached!")
     return angs
 
-def single_step_towards_target(angles, target_pos, target_ori, max_delta=0.1, right=True):
+def single_step_towards_target(angles, target_pos, target_ori, scale=1., max_delta=0.1, right=True):
     angs = np.array(angles)
-    pos, ori, j = fk.calc_fk_and_jacob(angs, jacob=True, right=right)
+    pos, ori, j = fk.calc_fk_and_jacob(angs, jacob=True, scale=scale, right=right)
     # follow jacobian towards new joint limits
     J = _calc_invJ(j)
     delta_pos = np.matrix((target_pos-pos)[0:3]).transpose()
@@ -47,7 +47,7 @@ def single_step_towards_target(angles, target_pos, target_ori, max_delta=0.1, ri
     # respect joint limits
     angs = clamp_joints(angs, right=right)
     # did we get closer to desired? if not, singularity, return no movement
-    new_pos, new_ori = fk.calc_fk_and_jacob(angs, jacob=False, right=right)
+    new_pos, new_ori = fk.calc_fk_and_jacob(angs, jacob=False, scale=scale, right=right)
     if np.linalg.norm(new_pos-target_pos) >= np.linalg.norm(pos-target_pos):
         return np.array(angles)
     # return new angles

@@ -7,7 +7,7 @@ import inverse_kinematics as ik
 from joint_definitions import left_arm_tags, left_arm_initial_pose, right_arm_tags, right_arm_initial_pose
 
 
-def right_arm_get_position(angles, full_pos=False):
+def right_arm_get_position(angles, full_pos=False, scale=1.):
     """
     Just calculate the position when joints on the pepper's right arm is in given positions
 
@@ -19,9 +19,9 @@ def right_arm_get_position(angles, full_pos=False):
       
       (position, orientation) = (np.array([position_x, position_y, position_z]), np.array([[R00, R01, R02], [R10, R11, R12], [R20, R21, R22]]))
     """
-    return fk.calc_fk_and_jacob(angles, jacob=False, right=True, full_pos=full_pos)
+    return fk.calc_fk_and_jacob(angles, jacob=False, right=True, scale=scale, full_pos=full_pos)
 
-def left_arm_get_position(angles, full_pos=False):
+def left_arm_get_position(angles, full_pos=False, scale=1.):
     """
     Just calculate the position when joints on the pepper's left arm is in given positions
 
@@ -33,7 +33,7 @@ def left_arm_get_position(angles, full_pos=False):
       
       (position, orientation) = (np.array([position_x, position_y, position_z]), np.array([[R00, R01, R02], [R10, R11, R12], [R20, R21, R22]]))
     """
-    return fk.calc_fk_and_jacob(angles, jacob=False, right=False, full_pos=full_pos)
+    return fk.calc_fk_and_jacob(angles, jacob=False, right=False, scale=scale, full_pos=full_pos)
 
 def right_arm_set_position(angles, target_pos, target_ori, epsilon=0.0001):
     """
@@ -53,9 +53,9 @@ def right_arm_set_position(angles, target_pos, target_ori, epsilon=0.0001):
 def left_arm_set_position(angles, target_pos, target_ori, epsilon = 0.0001):
     return ik.calc_inv_pos(angles, target_pos, target_ori, epsilon, right=False)
 
-def left_arm_ik_single_iteration(initial_angles, target_pos, target_ori):
-    return ik.single_step_towards_target(initial_angles, target_pos, target_ori, right=False)
+def left_arm_ik_single_iteration(initial_angles, target_pos, target_ori, scale=1.):
+    return ik.single_step_towards_target(initial_angles, target_pos, target_ori, scale=scale, right=False)
 
-def right_arm_ik_single_iteration(initial_angles, target_pos, target_ori):
-    return ik.single_step_towards_target(initial_angles, target_pos, target_ori, right=True)
+def right_arm_ik_single_iteration(initial_angles, target_pos, target_ori, scale=1.):
+    return ik.single_step_towards_target(initial_angles, target_pos, target_ori, scale=scale, right=True)
 

@@ -98,6 +98,7 @@ class VirtualArm:
     def __init__(self, side="right"):
         # parameters
         self.side = side
+        self.scale = 1.8
         # variables
         self.se3_virtual_torso_in_vrroom = None
         # constants
@@ -124,7 +125,7 @@ class VirtualArm:
         self.joint_angles = zero_pose_angles
         # forward kinematics
         se3_virtual_claw_in_virtual_torso = se3_from_pos_rot3(
-            *arm_get_position(self.joint_angles))
+            *arm_get_position(self.joint_angles, scale=self.scale))
         se3_virtual_torso_in_virtual_claw = se3.inverse_matrix(se3_virtual_claw_in_virtual_torso)
         # assume hand and claw are in the same place (user did a good job) to find virtual torso estimate
         se3_virtual_claw_in_vrhand = se3.identity_matrix()
@@ -181,7 +182,7 @@ class VirtualArm:
         new_pos = se3.translation_from_matrix(se3_virtual_claw_in_virtual_torso)
         new_rot = se3_virtual_claw_in_virtual_torso[:3, :3]
 #         new_angles = arm_set_position(self.joint_angles, new_pos, new_rot, epsilon = 0.1)
-        new_angles = arm_ik_single_iteration(self.joint_angles, new_pos, new_rot)
+        new_angles = arm_ik_single_iteration(self.joint_angles, new_pos, new_rot, scale=self.scale)
         if new_angles is not None:
             self.joint_angles = new_angles
 
@@ -200,7 +201,7 @@ class VirtualArm:
             joint_frames = ["LShoulder", "LBicep", "LElbow", "LForeArm", "l_wrist", "LHand"]
             torso_frame = "virtualarm_LTorso"
         # get position, orientation for every joint in arm
-        pos_in_torso, ori_in_torso = arm_get_position(self.joint_angles, full_pos=True)
+        pos_in_torso, ori_in_torso = arm_get_position(self.joint_angles, scale=self.scale, full_pos=True)
         time = rospy.Time.now()
         # publish tfs
         for pos, rot, frame in zip(pos_in_torso, ori_in_torso, joint_frames):

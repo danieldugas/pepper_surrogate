@@ -1,5 +1,8 @@
 <?xml version="1.0"?>
-<robot name="virtualarm">
+<robot name="virtualarm" xmlns:xacro="http://ros.org/wiki/xacro">
+
+  <xacro:property name="scale" value="1.8" />
+
   <link name="virtualarm_TorsoCenter">
     <visual>
       <geometry>
@@ -38,13 +41,13 @@
     </inertial>
     <visual>
       <geometry>
-        <mesh filename="package://pepper_meshes/meshes/1.0/RShoulderPitch.dae" scale="0.1 0.1 0.1"/>
+        <mesh filename="package://pepper_meshes/meshes/1.0/RShoulderPitch.dae" scale="${0.1*scale} ${0.1*scale} ${0.1*scale}"/>
       </geometry>
       <origin rpy="0 0 0" xyz="0 0 0"/>
     </visual>
     <collision>
       <geometry>
-        <mesh filename="package://pepper_meshes/meshes/1.0/RShoulderPitch_0.10.stl" scale="0.1 0.1 0.1"/>
+        <mesh filename="package://pepper_meshes/meshes/1.0/RShoulderPitch_0.10.stl" scale="${0.1*scale} ${0.1*scale} ${0.1*scale}"/>
       </geometry>
       <origin rpy="0 0 0" xyz="0 0 0"/>
     </collision>
@@ -64,13 +67,13 @@
     </inertial>
     <visual>
       <geometry>
-        <mesh filename="package://pepper_meshes/meshes/1.0/RShoulderRoll.dae" scale="0.1 0.1 0.1"/>
+        <mesh filename="package://pepper_meshes/meshes/1.0/RShoulderRoll.dae" scale="${0.1*scale} ${0.1*scale} ${0.1*scale}"/>
       </geometry>
       <origin rpy="0 0 0" xyz="0 0 0"/>
     </visual>
     <collision>
       <geometry>
-        <mesh filename="package://pepper_meshes/meshes/1.0/RShoulderRoll_0.10.stl" scale="0.1 0.1 0.1"/>
+        <mesh filename="package://pepper_meshes/meshes/1.0/RShoulderRoll_0.10.stl" scale="${0.1*scale} ${0.1*scale} ${0.1*scale}"/>
       </geometry>
       <origin rpy="0 0 0" xyz="0 0 0"/>
     </collision>
@@ -90,13 +93,13 @@
     </inertial>
     <visual>
       <geometry>
-        <mesh filename="package://pepper_meshes/meshes/1.0/RElbowYaw.dae" scale="0.1 0.1 0.1"/>
+        <mesh filename="package://pepper_meshes/meshes/1.0/RElbowYaw.dae" scale="${0.1*scale} ${0.1*scale} ${0.1*scale}"/>
       </geometry>
       <origin rpy="0 0 0" xyz="0 0 0"/>
     </visual>
     <collision>
       <geometry>
-        <mesh filename="package://pepper_meshes/meshes/1.0/RElbowYaw_0.10.stl" scale="0.1 0.1 0.1"/>
+        <mesh filename="package://pepper_meshes/meshes/1.0/RElbowYaw_0.10.stl" scale="${0.1*scale} ${0.1*scale} ${0.1*scale}"/>
       </geometry>
       <origin rpy="0 0 0" xyz="0 0 0"/>
     </collision>
@@ -116,13 +119,13 @@
     </inertial>
     <visual>
       <geometry>
-        <mesh filename="package://pepper_meshes/meshes/1.0/RElbowRoll.dae" scale="0.1 0.1 0.1"/>
+        <mesh filename="package://pepper_meshes/meshes/1.0/RElbowRoll.dae" scale="${0.1*scale} ${0.1*scale} ${0.1*scale}"/>
       </geometry>
       <origin rpy="0 0 0" xyz="0 0 0"/>
     </visual>
     <collision>
       <geometry>
-        <mesh filename="package://pepper_meshes/meshes/1.0/RElbowRoll_0.10.stl" scale="0.1 0.1 0.1"/>
+        <mesh filename="package://pepper_meshes/meshes/1.0/RElbowRoll_0.10.stl" scale="${0.1*scale} ${0.1*scale} ${0.1*scale}"/>
       </geometry>
       <origin rpy="0 0 0" xyz="0 0 0"/>
     </collision>
@@ -142,13 +145,13 @@
     </inertial>
     <visual>
       <geometry>
-        <mesh filename="package://pepper_meshes/meshes/1.0/RWristYaw.dae" scale="0.1 0.1 0.1"/>
+        <mesh filename="package://pepper_meshes/meshes/1.0/RWristYaw.dae" scale="${0.1*scale} ${0.1*scale} ${0.1*scale}"/>
       </geometry>
       <origin rpy="0 0 0" xyz="0 0 0"/>
     </visual>
     <collision>
       <geometry>
-        <mesh filename="package://pepper_meshes/meshes/1.0/RWristYaw_0.10.stl" scale="0.1 0.1 0.1"/>
+        <mesh filename="package://pepper_meshes/meshes/1.0/RWristYaw_0.10.stl" scale="${0.1*scale} ${0.1*scale} ${0.1*scale}"/>
       </geometry>
       <origin rpy="0 0 0" xyz="0 0 0"/>
     </collision>
@@ -197,13 +200,13 @@
     </inertial>
     <visual>
       <geometry>
-        <mesh filename="package://pepper_meshes/meshes/1.0/LShoulderPitch.dae" scale="0.1 0.1 0.1"/>
+        <mesh filename="package://pepper_meshes/meshes/1.0/LShoulderPitch.dae" scale="${0.1*scale} ${0.1*scale} ${0.1*scale}"/>
       </geometry>
       <origin rpy="0 0 0" xyz="0 0 0"/>
     </visual>
     <collision>
       <geometry>
-        <mesh filename="package://pepper_meshes/meshes/1.0/LShoulderPitch_0.10.stl" scale="0.1 0.1 0.1"/>
+        <mesh filename="package://pepper_meshes/meshes/1.0/LShoulderPitch_0.10.stl" scale="${0.1*scale} ${0.1*scale} ${0.1*scale}"/>
       </geometry>
       <origin rpy="0 0 0" xyz="0 0 0"/>
     </collision>
@@ -223,13 +226,13 @@
     </inertial>
     <visual>
       <geometry>
-        <mesh filename="package://pepper_meshes/meshes/1.0/LShoulderRoll.dae" scale="0.1 0.1 0.1"/>
+        <mesh filename="package://pepper_meshes/meshes/1.0/LShoulderRoll.dae" scale="${0.1*scale} ${0.1*scale} ${0.1*scale}"/>
       </geometry>
       <origin rpy="0 0 0" xyz="0 0 0"/>
     </visual>
     <collision>
       <geometry>
-        <mesh filename="package://pepper_meshes/meshes/1.0/LShoulderRoll_0.10.stl" scale="0.1 0.1 0.1"/>
+        <mesh filename="package://pepper_meshes/meshes/1.0/LShoulderRoll_0.10.stl" scale="${0.1*scale} ${0.1*scale} ${0.1*scale}"/>
       </geometry>
       <origin rpy="0 0 0" xyz="0 0 0"/>
     </collision>
@@ -249,13 +252,13 @@
     </inertial>
     <visual>
       <geometry>
-        <mesh filename="package://pepper_meshes/meshes/1.0/LElbowYaw.dae" scale="0.1 0.1 0.1"/>
+        <mesh filename="package://pepper_meshes/meshes/1.0/LElbowYaw.dae" scale="${0.1*scale} ${0.1*scale} ${0.1*scale}"/>
       </geometry>
       <origin rpy="0 0 0" xyz="0 0 0"/>
     </visual>
     <collision>
       <geometry>
-        <mesh filename="package://pepper_meshes/meshes/1.0/LElbowYaw_0.10.stl" scale="0.1 0.1 0.1"/>
+        <mesh filename="package://pepper_meshes/meshes/1.0/LElbowYaw_0.10.stl" scale="${0.1*scale} ${0.1*scale} ${0.1*scale}"/>
       </geometry>
       <origin rpy="0 0 0" xyz="0 0 0"/>
     </collision>
@@ -275,13 +278,13 @@
     </inertial>
     <visual>
       <geometry>
-        <mesh filename="package://pepper_meshes/meshes/1.0/LElbowRoll.dae" scale="0.1 0.1 0.1"/>
+        <mesh filename="package://pepper_meshes/meshes/1.0/LElbowRoll.dae" scale="${0.1*scale} ${0.1*scale} ${0.1*scale}"/>
       </geometry>
       <origin rpy="0 0 0" xyz="0 0 0"/>
     </visual>
     <collision>
       <geometry>
-        <mesh filename="package://pepper_meshes/meshes/1.0/LElbowRoll_0.10.stl" scale="0.1 0.1 0.1"/>
+        <mesh filename="package://pepper_meshes/meshes/1.0/LElbowRoll_0.10.stl" scale="${0.1*scale} ${0.1*scale} ${0.1*scale}"/>
       </geometry>
       <origin rpy="0 0 0" xyz="0 0 0"/>
     </collision>
@@ -301,13 +304,13 @@
     </inertial>
     <visual>
       <geometry>
-        <mesh filename="package://pepper_meshes/meshes/1.0/LWristYaw.dae" scale="0.1 0.1 0.1"/>
+        <mesh filename="package://pepper_meshes/meshes/1.0/LWristYaw.dae" scale="${0.1*scale} ${0.1*scale} ${0.1*scale}"/>
       </geometry>
       <origin rpy="0 0 0" xyz="0 0 0"/>
     </visual>
     <collision>
       <geometry>
-        <mesh filename="package://pepper_meshes/meshes/1.0/LWristYaw_0.10.stl" scale="0.1 0.1 0.1"/>
+        <mesh filename="package://pepper_meshes/meshes/1.0/LWristYaw_0.10.stl" scale="${0.1*scale} ${0.1*scale} ${0.1*scale}"/>
       </geometry>
       <origin rpy="0 0 0" xyz="0 0 0"/>
     </collision>

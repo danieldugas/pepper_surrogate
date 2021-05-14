@@ -4,13 +4,15 @@ import scipy as sp
 from scipy import linalg
 
 
-L1 = 0.14974
-L2 = 0.015
-L3 = 0.1812
-L4 = 0
-L5 = 0.150
-L6 = 0.0695
-L7 = 0.0303
+joint_distances = np.array([
+ 0.14974,
+ 0.015,
+ 0.1812,
+ 0,
+ 0.150,
+ 0.0695,
+ 0.0303
+])
 
 p = np.array([0,0,0,1])
 v0 = np.array([[1],[0],[0],[0]])
@@ -34,7 +36,8 @@ def transZ(th, x, y, z):
     return np.array([[c, -s, 0, x], [s, c, 0, y], [0, 0, 1, z], [0, 0, 0, 1]])
 
 
-def calc_fk_and_jacob(angles, jacob=True, right=True, full_pos=False):
+def calc_fk_and_jacob(angles, jacob=True, right=True, scale=1., full_pos=False):
+    L1, L2, L3, L4, L5, L6, L7 = joint_distances * scale
     _L1_ = -L1 if right else L1
     _L2_ = -L2 if right else L2
 

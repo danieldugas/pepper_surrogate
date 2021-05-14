@@ -2,7 +2,7 @@
 <launch>
 
 <!--   URDF -->
-  <arg name="virtualarm_model" default="$(find pepper_surrogate)/urdf/01-virtualarm.urdf"/>
+  <arg name="virtualarm_model" default="$(find pepper_surrogate)/urdf/01-virtualarm.xacro"/>
   <param name="virtualarm_description" command="$(find xacro)/xacro $(arg virtualarm_model)" />
   <arg name="oculus_model" default="$(find pepper_surrogate)/urdf/02-oculus.urdf"/>
   <param name="oculus_description" command="$(find xacro)/xacro $(arg oculus_model)" />
