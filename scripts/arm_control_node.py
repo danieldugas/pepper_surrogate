@@ -11,6 +11,8 @@ from geometry_msgs.msg import TransformStamped
 
 import pepper_kinematics as pk
 
+VIRTUALARM_SCALE = 1.8 # also change this value in urdf/01-virtualarm.xacro
+
 # all angles in radians
 left_arm_rest_pose = {
     'LShoulderPitch': 1.5,
@@ -98,7 +100,7 @@ class VirtualArm:
     def __init__(self, side="right"):
         # parameters
         self.side = side
-        self.scale = 1.8
+        self.scale = VIRTUALARM_SCALE
         # variables
         self.se3_virtual_torso_in_vrroom = None
         # constants
