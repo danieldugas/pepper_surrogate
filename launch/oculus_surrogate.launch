@@ -8,7 +8,9 @@
   <param name="oculus_description" command="$(find xacro)/xacro $(arg oculus_model)" />
 
 <!--   Oculus and Head Control -->
-  <node pkg="pepper_surrogate" type="head_control_node" name="head_control_node"/>
+  <node pkg="pepper_surrogate" type="head_control_node" name="head_control_node">
+    <param name="verbosity" value="1"/>
+  </node>
 
 <!--   Realsense -->
   <include file="$(find realsense2_camera)/launch/rs_aligned_depth.launch" />

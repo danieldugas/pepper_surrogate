@@ -105,6 +105,7 @@ class OculusHeadController {
       const std::string kPepperPoseTopic = "/pepper_robot/pose/joint_angles";
       const std::string kButtonATopic = "/oculus/button_a_toggle";
       const std::string kButtonBTopic = "/oculus/button_b_toggle";
+      const std::string kCmdVelTopic = "/cmd_vel";
       kVRRoomFrame = "vrroom";
       kOdomFrame = "odom";
       kHMDFrame = "oculus";
@@ -124,6 +125,7 @@ class OculusHeadController {
       pose_pub_ = nh_.advertise<naoqi_bridge_msgs::JointAnglesWithSpeed>(kPepperPoseTopic, 1);
       button_a_pub_ = nh_.advertise<pepper_surrogate::ButtonToggle>(kButtonATopic, 1);
       button_b_pub_ = nh_.advertise<pepper_surrogate::ButtonToggle>(kButtonBTopic, 1);
+      cmd_vel_pub_ = nh_.advertise<geometry_msgs::Twist>(kCmdVelTopic, 1);
 
       // Initialize times.
       pose_pub_last_publish_time_ = ros::Time::now();
@@ -133,7 +135,13 @@ class OculusHeadController {
       get_tf_timer_ = nh_.createTimer(ros::Duration(0.01), &OculusHeadController::gettfCallback, this);
 
     }
-    ~OculusHeadController() {}
+    ~OculusHeadController() {
+      geometry_msgs::Twist cmd_vel_msg;
+      cmd_vel_msg.linear.x = 0.;
+      cmd_vel_msg.angular.z = 0.;
+      cmd_vel_msg.linear.y = 0.;
+      cmd_vel_pub_.publish(cmd_vel_msg);
+    }
 
   protected:
     int init_hmd() {
@@ -282,8 +290,18 @@ class OculusHeadController {
       getOculusInPepperRPY(q_HMD_in_vrroom, roll, pitch, yaw);
       sendHeadTrackingJointAngles(pitch, yaw);
 
+      // if we don't know base_footprint's tf, this is 0
       double yaw_oculus_in_base_footprint = yaw;
 
+      // rotate base if yaw is high (natural max human yaw is a bit less than 90deg)
+      geometry_msgs::Twist cmd_vel_msg;
+      cmd_vel_msg.linear.x = 0.;
+      cmd_vel_msg.linear.y = 0.;
+      cmd_vel_msg.angular.z = 0.;
+      float kMaxHumanHeadYawRad = 1.6;
+      if (abs(yaw_oculus_in_base_footprint) > kMaxHumanHeadYawRad) {
+        cmd_vel_msg.angular.z = yaw_oculus_in_base_footprint - (yaw_oculus_in_base_footprint > 0 ? kMaxHumanHeadYawRad : -kMaxHumanHeadYawRad);
+      }
 
       // ---------------------
       // Controllers
@@ -296,7 +314,8 @@ class OculusHeadController {
           ohmd_device* ctr;
           std::string ctr_frame;
           float* prev_control_state;
-          if (k == 0) {
+          bool is_left_controller = (k == 0);
+          if (is_left_controller) {
             ctr = lctr_;
             ctr_frame = kLCtrFrame;
             prev_control_state = lctr_prev_state_;
@@ -364,6 +383,8 @@ class OculusHeadController {
               printf("\n\n");
             }
 
+            const static float kMaxBaseVelMPerS = 0.55; // Using moveToward, vels are normalized
+            const static float kMaxBaseRotRadPerS = 2.; // Using moveToward, rotation is normalized
             for(int i = 0; i < control_count; i++){
               bool is_toggled = false;
               if (control_state[i] != prev_control_state[i]) {
@@ -382,6 +403,10 @@ class OculusHeadController {
                 if (control_state[i]) {
                   resetHeadYaw(yaw_oculus_in_base_footprint);
                 }
+              } else if (strcmp(controls_fn_str[controls_fn[i]], "analog-x") == 0 && is_left_controller) {
+                  cmd_vel_msg.linear.y = -control_state[i] * kMaxBaseVelMPerS;
+              } else if (strcmp(controls_fn_str[controls_fn[i]], "analog-y") == 0 && is_left_controller) {
+                  cmd_vel_msg.linear.x = control_state[i] * kMaxBaseVelMPerS;
               }
             }
 
@@ -389,6 +414,10 @@ class OculusHeadController {
 
         } // for each controller
       } // if controllers enabled
+
+      // publish cmd_vel
+      cmd_vel_pub_.publish(cmd_vel_msg);
+
     }
 
     // returns the roll, pitch, yaw of oculus in base_footprint frame
@@ -496,6 +525,7 @@ class OculusHeadController {
     ros::Publisher pose_pub_;
     ros::Publisher button_a_pub_;
     ros::Publisher button_b_pub_;
+    ros::Publisher cmd_vel_pub_;
     ros::Time pose_pub_last_publish_time_;
     tf2_ros::TransformBroadcaster br_;
     tf2_ros::Buffer tfBuffer_;
@@ -534,7 +564,7 @@ int main(int argc, char **argv) {
 //   oldmain(argc, argv);
 
   ros::init(argc, argv, "head_control_node");
-  ros::NodeHandle n;
+  ros::NodeHandle n("~");
   OculusHeadController head_controller(n);
 
   try {
