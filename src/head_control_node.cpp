@@ -398,8 +398,9 @@ class OculusHeadController {
             }
 
 //             const static float kMaxBaseVelMPerS = 0.55; // Using moveToward, vels are normalized
-            const static float kMaxBaseVelMPerS = 0.1; // DEBUG SAFETY SPEED CAP
-            const static float kMaxBaseRotRadPerS = 2.; // Using moveToward, rotation is normalized
+            const static float kMaxBaseVelMPerS = 0.2; // DEBUG SAFETY SPEED CAP
+//             const static float kMaxBaseRotRadPerS = 2.; // Using moveToward, rotation is normalized
+            const static float kMaxBaseRotRadPerS = 0.5; // Using moveToward, rotation is normalized
             const static float kLAnalogDeadzone = 0.1; // small movements of the joystick do nothing
             for(int i = 0; i < control_count; i++){
               bool is_toggled = false;
@@ -423,6 +424,8 @@ class OculusHeadController {
                   cmd_vel_msg.linear.y = -deadzone(control_state[i], kLAnalogDeadzone) * kMaxBaseVelMPerS;
               } else if (strcmp(controls_fn_str[controls_fn[i]], "analog-y") == 0 && is_left_controller) {
                   cmd_vel_msg.linear.x = deadzone(control_state[i], kLAnalogDeadzone) * kMaxBaseVelMPerS;
+              } else if (strcmp(controls_fn_str[controls_fn[i]], "analog-x") == 0 && !is_left_controller) {
+                  cmd_vel_msg.angular.z = -deadzone(control_state[i], kLAnalogDeadzone) * kMaxBaseRotRadPerS;
               }
             }
 
@@ -477,8 +480,11 @@ class OculusHeadController {
       const static double kMaxHeadYawRad =  2.0857;
       const static double kMinHeadPitchRad = -0.7068;
       const static double kMaxHeadPitchRad =  0.6371;
+      const static double kMinHipPitchRad = -1.0385;
+      const static double kMaxHipPitchRad =  1.0385;
       const static std::string kHeadYawJointName = "HeadYaw";
       const static std::string kHeadPitchJointName = "HeadPitch";
+      const static std::string kHipPitchJointName = "HipPitch";
       const static ros::Duration kMaxPosePubRate(0.1);
       // Limit the maximum rate publishing rate for pose control
       if ( ( ros::Time::now() - pose_pub_last_publish_time_ ) > kMaxPosePubRate )
@@ -489,6 +495,19 @@ class OculusHeadController {
         joint_angles_msg.joint_angles.push_back(clip(yaw, kMinHeadYawRad, kMaxHeadYawRad));
         joint_angles_msg.joint_names.push_back(kHeadPitchJointName);
         joint_angles_msg.joint_angles.push_back(clip(pitch, kMinHeadPitchRad, kMaxHeadPitchRad));
+        double kRestHipPitchRad = -0.1;
+        double hip_pitch = kRestHipPitchRad;
+        // Lean down if head is pointing down hard (to see feet)
+        if (pitch > kMaxHeadPitchRad) {
+          hip_pitch = -(pitch - kMaxHeadPitchRad) + kRestHipPitchRad;
+        // lean back if looking up (disabled, unstable)
+        } else if (pitch < kMinHeadPitchRad) {
+          if (false) {
+            hip_pitch = -(pitch - kMinHeadPitchRad) + kRestHipPitchRad;
+          }
+        }
+        joint_angles_msg.joint_names.push_back(kHipPitchJointName);
+        joint_angles_msg.joint_angles.push_back(clip(hip_pitch, kMinHipPitchRad, kMaxHipPitchRad));
         pose_pub_.publish(joint_angles_msg);
         pose_pub_last_publish_time_ = ros::Time::now();
       }

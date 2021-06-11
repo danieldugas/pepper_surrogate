@@ -10,12 +10,19 @@
 <!--   Oculus and Head Control -->
   <node pkg="pepper_surrogate" type="head_control_node" name="head_control_node">
     <param name="verbosity" value="1"/>
-    <remap from="/cmd_vel" to="/desired_cmd_vel" />
+<!--     <remap from="/cmd_vel" to="/desired_cmd_vel" /> -->
   </node>
 
 <!--   Realsense (realsense node should run on robot pc) -->
 <!--   <include file="$(find realsense2_camera)/launch/rs_aligned_depth.launch" /> -->
-  <node pkg="pepper_surrogate" type="stereo_camera_node.py" name="stereo_camera_node"/>
+  <node pkg="image_transport" type="republish" name="republish_left"
+    args="compressed in:=/camera/infra1/image_rect_raw raw out:=/republish/infra1/image"/>
+  <node pkg="image_transport" type="republish" name="republish_right"
+    args="compressed in:=/camera/infra2/image_rect_raw raw out:=/republish/infra2/image"/>
+  <node pkg="pepper_surrogate" type="stereo_camera_node.py" name="stereo_camera_node">
+    <remap from="/camera/infra1/image_rect_raw" to="/republish/infra1/image"/>
+    <remap from="/camera/infra2/image_rect_raw" to="/republish/infra2/image"/>
+  </node>
 
 <!--   Arm control -->
   <node pkg="pepper_surrogate" type="arm_control_node.py" name="arm_control_node"/>

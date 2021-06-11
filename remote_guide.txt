@@ -1,0 +1,34 @@
+# turn on pepper-laptop and bigboy
+
+# on both:
+nmcli connection up mavt-asl-iot
+
+# -- pepper roscore --
+# on bigboy new terminal
+ssh pepper-laptop
+# now pepper-laptop (ssh)
+wopepper
+export ROS_MASTER_URI=http://pepper-laptop:11311
+roscore
+
+# -- pepper basic functions --
+# on bigboy new terminal
+ssh pepper-laptop
+# now pepper-laptop (ssh)
+wopepper
+export ROS_MASTER_URI=http://pepper-laptop:11311
+roslaunch asl_pepper_basic_functions pepper_bringup_T460s_ETHERNET.launch nao_ip:=10.42.0.84 realsense:=true
+
+# -- pepper disable autonomous --
+# on bigboy new terminal
+ssh pepper-laptop
+# now pepper-laptop (ssh)
+ssh nao@10.42.0.84
+# now pepper (ssh)
+# up arrow, watch -n 10 ./disable_autonomous_functions.sh
+
+# -- oculus surrogate --
+# on bigboy new terminal
+wopepper
+export ROS_MASTER_URI=http://pepper-laptop:11311
+roslaunch pepper_surrogate oculus_surrogate.launch
