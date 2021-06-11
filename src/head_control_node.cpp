@@ -26,6 +26,20 @@
 
 void ohmd_sleep(double);
 
+// applies a deadzone filter to a joystick value [0,1]
+// the value is rescaled so that a threshold it is 0, and 1 at 1.
+float deadzone(float value, float threshold) {
+  float result = 0;
+  if (abs(value) > threshold) {
+    if (value > 0) {
+        result = value - threshold / (1.f - threshold);
+    } else {
+        result = value + threshold / (1.f - threshold);
+    }
+  }
+  return result;
+}
+
 // constrains angle to [-pi, pi]
 double constrainAngle(double x){
     x = fmod(x + M_PI,2.*M_PI);
@@ -383,8 +397,10 @@ class OculusHeadController {
               printf("\n\n");
             }
 
-            const static float kMaxBaseVelMPerS = 0.55; // Using moveToward, vels are normalized
+//             const static float kMaxBaseVelMPerS = 0.55; // Using moveToward, vels are normalized
+            const static float kMaxBaseVelMPerS = 0.1; // DEBUG SAFETY SPEED CAP
             const static float kMaxBaseRotRadPerS = 2.; // Using moveToward, rotation is normalized
+            const static float kLAnalogDeadzone = 0.1; // small movements of the joystick do nothing
             for(int i = 0; i < control_count; i++){
               bool is_toggled = false;
               if (control_state[i] != prev_control_state[i]) {
@@ -404,9 +420,9 @@ class OculusHeadController {
                   resetHeadYaw(yaw_oculus_in_base_footprint);
                 }
               } else if (strcmp(controls_fn_str[controls_fn[i]], "analog-x") == 0 && is_left_controller) {
-                  cmd_vel_msg.linear.y = -control_state[i] * kMaxBaseVelMPerS;
+                  cmd_vel_msg.linear.y = -deadzone(control_state[i], kLAnalogDeadzone) * kMaxBaseVelMPerS;
               } else if (strcmp(controls_fn_str[controls_fn[i]], "analog-y") == 0 && is_left_controller) {
-                  cmd_vel_msg.linear.x = control_state[i] * kMaxBaseVelMPerS;
+                  cmd_vel_msg.linear.x = deadzone(control_state[i], kLAnalogDeadzone) * kMaxBaseVelMPerS;
               }
             }
 
