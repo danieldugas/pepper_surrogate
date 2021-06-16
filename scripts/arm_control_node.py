@@ -184,9 +184,33 @@ class VirtualArm:
         new_pos = se3.translation_from_matrix(se3_virtual_claw_in_virtual_torso)
         new_rot = se3_virtual_claw_in_virtual_torso[:3, :3]
 #         new_angles = arm_set_position(self.joint_angles, new_pos, new_rot, epsilon = 0.1)
+        # inverse kinematics (using jacobian) - limited to 3DOF end-effector (no rotation)
+        # human hand is much more flexible than pepper's. Mapping hand rotations to joint angles
+        # is not straightforward.
         new_angles = arm_ik_single_iteration(self.joint_angles, new_pos, new_rot, scale=self.scale)
-        if new_angles is not None:
-            self.joint_angles = new_angles
+        if new_angles is None:
+            return
+        # try to map human wrist yaw to pepper wrist yaw
+        # get virtual claw (desired) in virtual wrist (after ik) frame
+        if self.side == "right":
+            arm_get_position = pk.right_arm_get_position
+        else:
+            arm_get_position = pk.left_arm_get_position
+        # get position, orientation for every joint in arm
+        pos_in_torso, ori_in_torso = arm_get_position(self.joint_angles, scale=self.scale, full_pos=True)
+        idx = 4 # joint_frames = ["LShoulder", "LBicep", "LElbow", "LForeArm", "l_wrist", "LHand"]
+        se3_virtual_wrist_in_virtual_torso = se3_from_pos_rot3(pos_in_torso[idx], ori_in_torso[idx])
+        se3_virtual_torso_in_virtual_wrist = se3.inverse_matrix(se3_virtual_wrist_in_virtual_torso)
+        se3_virtual_claw_in_virtual_wrist = np.dot(
+            se3_virtual_torso_in_virtual_wrist,
+            se3_virtual_claw_in_virtual_torso
+        )
+        # x is the distal direction in the wrist and virtual_claw tf
+        wrist_yaw, _, _ = se3.euler_from_matrix(se3_virtual_claw_in_virtual_wrist)
+        print(wrist_yaw)
+        
+        # actualize angles
+        self.joint_angles = new_angles
 
     def visualize(self, tf_br):
         """ show the virtual arm in rviz
@@ -194,12 +218,10 @@ class VirtualArm:
         # left vs right functions and constants
         if self.side == "right":
             arm_get_position = pk.right_arm_get_position
-            se3_vrhand_in_controller = se3_right_vrhand_in_controller
             joint_frames = ["RShoulder", "RBicep", "RElbow", "RForeArm", "r_wrist", "RHand"]
             torso_frame = "virtualarm_RTorso"
         else:
             arm_get_position = pk.left_arm_get_position
-            se3_vrhand_in_controller = se3_left_vrhand_in_controller
             joint_frames = ["LShoulder", "LBicep", "LElbow", "LForeArm", "l_wrist", "LHand"]
             torso_frame = "virtualarm_LTorso"
         # get position, orientation for every joint in arm
