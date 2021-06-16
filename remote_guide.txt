@@ -17,7 +17,7 @@ ssh pepper-laptop
 # now pepper-laptop (ssh)
 wopepper
 export ROS_MASTER_URI=http://pepper-laptop:11311
-roslaunch asl_pepper_basic_functions pepper_bringup_T460s_ETHERNET.launch nao_ip:=10.42.0.84 realsense:=true
+mon launch asl_pepper_basic_functions pepper_bringup_T460s_ETHERNET.launch nao_ip:=10.42.0.84 realsense:=true roscore_ip:=pepper-laptop
 
 # -- pepper disable autonomous --
 # on bigboy new terminal
@@ -31,4 +31,4 @@ ssh nao@10.42.0.84
 # on bigboy new terminal
 wopepper
 export ROS_MASTER_URI=http://pepper-laptop:11311
-roslaunch pepper_surrogate oculus_surrogate.launch
+mon launch pepper_surrogate oculus_surrogate.launch
