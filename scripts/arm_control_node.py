@@ -192,23 +192,26 @@ class VirtualArm:
             return
         # try to map human wrist yaw to pepper wrist yaw
         # get virtual claw (desired) in virtual wrist (after ik) frame
+        WRST_ANG_IDX = 4
         if self.side == "right":
             arm_get_position = pk.right_arm_get_position
+            yaw_limits = [pk.get_right_arm_min_angles()[WRST_ANG_IDX], pk.get_right_arm_max_angles()[WRST_ANG_IDX]]
         else:
             arm_get_position = pk.left_arm_get_position
+            yaw_limits = [pk.get_left_arm_min_angles()[WRST_ANG_IDX], pk.get_left_arm_max_angles()[WRST_ANG_IDX]]
         # get position, orientation for every joint in arm
         pos_in_torso, ori_in_torso = arm_get_position(self.joint_angles, scale=self.scale, full_pos=True)
-        idx = 4 # joint_frames = ["LShoulder", "LBicep", "LElbow", "LForeArm", "l_wrist", "LHand"]
-        se3_virtual_wrist_in_virtual_torso = se3_from_pos_rot3(pos_in_torso[idx], ori_in_torso[idx])
-        se3_virtual_torso_in_virtual_wrist = se3.inverse_matrix(se3_virtual_wrist_in_virtual_torso)
-        se3_virtual_claw_in_virtual_wrist = np.dot(
-            se3_virtual_torso_in_virtual_wrist,
+        FRARM_IDX = 3 # joint_frames = ["LShoulder", "LBicep", "LElbow", "LForeArm", "l_wrist", "LHand"]
+        se3_virtual_forearm_in_virtual_torso = se3_from_pos_rot3(pos_in_torso[FRARM_IDX], ori_in_torso[FRARM_IDX])
+        se3_virtual_torso_in_virtual_forearm = se3.inverse_matrix(se3_virtual_forearm_in_virtual_torso)
+        se3_virtual_claw_in_virtual_forearm = np.dot(
+            se3_virtual_torso_in_virtual_forearm,
             se3_virtual_claw_in_virtual_torso
         )
         # x is the distal direction in the wrist and virtual_claw tf
-        wrist_yaw, _, _ = se3.euler_from_matrix(se3_virtual_claw_in_virtual_wrist)
-        print(wrist_yaw)
-        
+        wrist_yaw, _, _ = se3.euler_from_matrix(se3_virtual_claw_in_virtual_forearm)
+        wrist_yaw = np.clip(wrist_yaw, yaw_limits[0], yaw_limits[1])
+        new_angles[WRST_ANG_IDX] = wrist_yaw
         # actualize angles
         self.joint_angles = new_angles
 

@@ -5,6 +5,7 @@ from scipy import linalg
 import forward_kinematics as fk
 import inverse_kinematics as ik
 from joint_definitions import left_arm_tags, left_arm_initial_pose, right_arm_tags, right_arm_initial_pose
+from joint_definitions import get_left_arm_min_angles, get_left_arm_max_angles, get_right_arm_min_angles, get_right_arm_max_angles
 
 
 def right_arm_get_position(angles, full_pos=False, scale=1.):
