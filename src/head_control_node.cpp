@@ -13,6 +13,7 @@
 #include <ros/ros.h>
 #include <std_msgs/String.h>
 #include <std_msgs/Float32.h>
+#include <std_msgs/Bool.h>
 #include <std_srvs/Trigger.h>
 #include <sensor_msgs/Joy.h>
 #include <geometry_msgs/Twist.h>
@@ -123,6 +124,7 @@ class OculusHeadController {
       const std::string kLeftGripperTopic = "/oculus/left_gripper";
       const std::string kRightGripperTopic = "/oculus/right_gripper";
       const std::string kCmdVelTopic = "/cmd_vel";
+      const std::string kCmdVelEnabledTopic = "/oculus/cmd_vel_enabled";
       kVRRoomFrame = "vrroom";
       // the real world frame that is fixed.
       // if set to odom, body rotation is independent of head rotation
@@ -137,6 +139,7 @@ class OculusHeadController {
       // Variables
       rot_vr_in_odom_ = tf::Quaternion(0., 0., 0., 1.);
       known_pepper_in_vrroom_ = false;
+      cmd_vel_enabled_ = true;
 
       // Parameters
       nh_.param<int>("verbosity", verbosity_, 0);
@@ -148,6 +151,7 @@ class OculusHeadController {
       left_gripper_pub_ = nh_.advertise<std_msgs::Float32>(kLeftGripperTopic, 1);
       right_gripper_pub_ = nh_.advertise<std_msgs::Float32>(kRightGripperTopic, 1);
       cmd_vel_pub_ = nh_.advertise<geometry_msgs::Twist>(kCmdVelTopic, 1);
+      cmd_vel_enabled_pub_ = nh_.advertise<std_msgs::Bool>(kCmdVelEnabledTopic, 1);
 
       // Initialize times.
       pose_pub_last_publish_time_ = ros::Time::now();
@@ -429,6 +433,22 @@ class OculusHeadController {
                 if (control_state[i]) {
                   resetHeadYaw(yaw_oculus_in_base_footprint);
                 }
+              } else if (strcmp(controls_fn_str[controls_fn[i]], "menu") == 0 && is_toggled) {
+                if (control_state[i]) {
+                  if (cmd_vel_enabled_) {
+                    cmd_vel_enabled_ = false;
+                    geometry_msgs::Twist cmd_vel_msg;
+                    cmd_vel_msg.linear.x = 0.;
+                    cmd_vel_msg.angular.z = 0.;
+                    cmd_vel_msg.linear.y = 0.;
+                    cmd_vel_pub_.publish(cmd_vel_msg);
+                  } else {
+                    cmd_vel_enabled_ = true;
+                  }
+                  std_msgs::Bool msg;
+                  msg.data = cmd_vel_enabled_;
+                  cmd_vel_enabled_pub_.publish(msg);
+                }
               } else if (strcmp(controls_fn_str[controls_fn[i]], "analog-x") == 0 && is_left_controller) {
                   cmd_vel_msg.linear.y = -deadzone(control_state[i], kLAnalogDeadzone) * kMaxBaseVelMPerS;
               } else if (strcmp(controls_fn_str[controls_fn[i]], "analog-y") == 0 && is_left_controller) {
@@ -452,7 +472,9 @@ class OculusHeadController {
       } // if controllers enabled
 
       // publish cmd_vel
-      cmd_vel_pub_.publish(cmd_vel_msg);
+      if (cmd_vel_enabled_) {
+        cmd_vel_pub_.publish(cmd_vel_msg);
+      }
 
     }
 
@@ -580,12 +602,14 @@ class OculusHeadController {
     ros::Publisher left_gripper_pub_;
     ros::Publisher right_gripper_pub_;
     ros::Publisher cmd_vel_pub_;
+    ros::Publisher cmd_vel_enabled_pub_;
     ros::Time pose_pub_last_publish_time_;
     tf2_ros::TransformBroadcaster br_;
     tf2_ros::Buffer tfBuffer_;
     tf2_ros::TransformListener tfListener_;
     geometry_msgs::TransformStamped pepper_in_vrroom_;
     bool known_pepper_in_vrroom_;
+    bool cmd_vel_enabled_;
     std::string kBaseLinkFrame;
     std::string kVRRoomFrame;
     std::string kOdomFrame;
