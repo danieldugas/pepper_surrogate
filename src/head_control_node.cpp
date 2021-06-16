@@ -124,7 +124,10 @@ class OculusHeadController {
       const std::string kRightGripperTopic = "/oculus/right_gripper";
       const std::string kCmdVelTopic = "/cmd_vel";
       kVRRoomFrame = "vrroom";
-      kOdomFrame = "odom";
+      // the real world frame that is fixed.
+      // if set to odom, body rotation is independent of head rotation
+      // if set to base_footprint, body and head rotation are dependent
+      kOdomFrame = "base_footprint";
       kHMDFrame = "oculus";
       kLCtrFrame = "oculus_left_controller";
       kRCtrFrame = "oculus_right_controller";
@@ -275,6 +278,7 @@ class OculusHeadController {
       return 0;
     }
 
+    // Gets the transform between pepper and vrroom
     void gettfCallback(const ros::TimerEvent& e) {
       try{
         pepper_in_vrroom_ = tfBuffer_.lookupTransform(kVRRoomFrame, kBaseLinkFrame, ros::Time(0));

@@ -107,16 +107,20 @@ class MinimapNode:
             pixel_xy_in_minimap = self.minimap2d.ij_to_xy(pixel_ij_in_minimap)
             pixel_xy_in_refmap = np.ascontiguousarray(apply_tf(pixel_xy_in_minimap, pose2d_minimap_in_refmap))
             pixel_ij_in_refmap = self.refmap_manager.map_8ds.xy_to_ij(pixel_xy_in_refmap, clip_if_outside=True)
-            pixel_values = self.refmap_manager.map_8ds.occupancy()[(pixel_ij_in_refmap[:, 0],
-                                                                   pixel_ij_in_refmap[:, 1])]
-            pixel_values = pixel_values.reshape((self.kMinimapWidthPx, self.kMinimapHeightPx))
-            pixel_values[pixel_values < 0] = 0.5
-            if FASTMARCH:
-                fm = self.refmap_manager.map_8ds.fastmarch(
-                    self.refmap_manager.map_8ds.xy_to_ij(pose2d_base_footprint_in_refmap[None, :2])[0])
-                fastmarch_values = fm[(pixel_ij_in_refmap[:, 0],
-                                       pixel_ij_in_refmap[:, 1])].reshape(
-                                           (self.kMinimapWidthPx, self.kMinimapHeightPx))
+            try:
+                pixel_values = self.refmap_manager.map_8ds.occupancy()[(pixel_ij_in_refmap[:, 0],
+                                                                       pixel_ij_in_refmap[:, 1])]
+                pixel_values = pixel_values.reshape((self.kMinimapWidthPx, self.kMinimapHeightPx))
+                pixel_values[pixel_values < 0] = 0.5
+                if FASTMARCH:
+                    fm = self.refmap_manager.map_8ds.fastmarch(
+                        self.refmap_manager.map_8ds.xy_to_ij(pose2d_base_footprint_in_refmap[None, :2])[0])
+                    fastmarch_values = fm[(pixel_ij_in_refmap[:, 0],
+                                           pixel_ij_in_refmap[:, 1])].reshape(
+                                               (self.kMinimapWidthPx, self.kMinimapHeightPx))
+            except IndexError as e:
+                print(e)
+                return
             self.minimap2d._occupancy = pixel_values
             inv_occ = (1. - self.minimap2d.occupancy())
             R = inv_occ
