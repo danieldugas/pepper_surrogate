@@ -103,6 +103,8 @@ class VirtualArm:
         self.scale = VIRTUALARM_SCALE
         # variables
         self.se3_virtual_torso_in_vrroom = None
+        self.joint_angles = None
+        self.gripper_open = 1.
         # constants
         self.joint_names = pk.right_arm_tags if side == "right" else pk.left_arm_tags
 
@@ -190,6 +192,7 @@ class VirtualArm:
         new_angles = arm_ik_single_iteration(self.joint_angles, new_pos, new_rot, scale=self.scale)
         if new_angles is None:
             return
+        # -------------
         # try to map human wrist yaw to pepper wrist yaw
         # get virtual claw (desired) in virtual wrist (after ik) frame
         WRST_ANG_IDX = 4
@@ -223,10 +226,12 @@ class VirtualArm:
             arm_get_position = pk.right_arm_get_position
             joint_frames = ["RShoulder", "RBicep", "RElbow", "RForeArm", "r_wrist", "RHand"]
             torso_frame = "virtualarm_RTorso"
+            gripper_frame = "virtualarm_r_gripper"
         else:
             arm_get_position = pk.left_arm_get_position
             joint_frames = ["LShoulder", "LBicep", "LElbow", "LForeArm", "l_wrist", "LHand"]
             torso_frame = "virtualarm_LTorso"
+            gripper_frame = "virtualarm_l_gripper"
         # get position, orientation for every joint in arm
         pos_in_torso, ori_in_torso = arm_get_position(self.joint_angles, scale=self.scale, full_pos=True)
         time = rospy.Time.now()
@@ -245,6 +250,20 @@ class VirtualArm:
             t.transform.rotation.z = q[2]
             t.transform.rotation.w = q[3]
             tf_br.sendTransform(t)
+        # publish fingers tf
+        t = TransformStamped()
+        t.header.stamp = time
+        t.header.frame_id = "virtualarm_" + joint_frames[-1]
+        t.child_frame_id = gripper_frame
+        t.transform.translation.x = 0
+        t.transform.translation.y = 0
+        t.transform.translation.z = 0
+        q = se3.quaternion_from_euler(0, self.gripper_open * np.pi / 2., 0)
+        t.transform.rotation.x = q[0]
+        t.transform.rotation.y = q[1]
+        t.transform.rotation.z = q[2]
+        t.transform.rotation.w = q[3]
+        tf_br.sendTransform(t)
         # publish torso in vrroom
         t = TransformStamped()
         t.header.stamp = time
@@ -285,6 +304,8 @@ class ArmControlNode:
         # Subscribers
         rospy.Subscriber("/oculus/button_a_toggle", ButtonToggle, self.deadmanswitch_toggle_callback)
         rospy.Subscriber("/oculus/button_b_toggle", ButtonToggle, self.zeroswitch_toggle_callback)
+        rospy.Subscriber("/oculus/left_gripper", ButtonToggle, self.left_gripperswitch_toggle_callback)
+        rospy.Subscriber("/oculus/right_gripper", ButtonToggle, self.right_gripperswitch_toggle_callback)
 
         # Timer
         rospy.Timer(rospy.Duration(0.01), self.arm_update_routine)
@@ -407,6 +428,12 @@ class ArmControlNode:
             print("to ", self.current_state)
         else:
             pass
+
+    def right_gripperswitch_toggle_callback(self, msg):
+        pass
+
+    def left_gripperswitch_toggle_callback(self, msg):
+        pass
 
     def deadmanswitch_toggle_callback(self, msg):
         if msg.event == ButtonToggle.PRESSED:
