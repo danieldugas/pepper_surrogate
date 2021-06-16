@@ -6,6 +6,7 @@ import tf2_ros
 import tf.transformations as se3
 
 from pepper_surrogate.msg import ButtonToggle
+from std_msgs.msg import Float32
 from naoqi_bridge_msgs.msg import JointAnglesWithSpeed
 from geometry_msgs.msg import TransformStamped
 
@@ -104,9 +105,10 @@ class VirtualArm:
         # variables
         self.se3_virtual_torso_in_vrroom = None
         self.joint_angles = None
-        self.gripper_open = 1.
+        self.gripper_open = None
         # constants
         self.joint_names = pk.right_arm_tags if side == "right" else pk.left_arm_tags
+        self.gripper_name = "RHand" if side == "right" else "LHand"
 
     def initialize_from_zero_pose_forward_kinematics(self, se3_controller_in_vrroom, tf_br):
         """ We know the angles for pepper's arms in zero pose.
@@ -251,19 +253,20 @@ class VirtualArm:
             t.transform.rotation.w = q[3]
             tf_br.sendTransform(t)
         # publish fingers tf
-        t = TransformStamped()
-        t.header.stamp = time
-        t.header.frame_id = "virtualarm_" + joint_frames[-1]
-        t.child_frame_id = gripper_frame
-        t.transform.translation.x = 0
-        t.transform.translation.y = 0
-        t.transform.translation.z = 0
-        q = se3.quaternion_from_euler(0, self.gripper_open * np.pi / 2., 0)
-        t.transform.rotation.x = q[0]
-        t.transform.rotation.y = q[1]
-        t.transform.rotation.z = q[2]
-        t.transform.rotation.w = q[3]
-        tf_br.sendTransform(t)
+        if self.gripper_open is not None:
+            t = TransformStamped()
+            t.header.stamp = time
+            t.header.frame_id = "virtualarm_" + joint_frames[-1]
+            t.child_frame_id = gripper_frame
+            t.transform.translation.x = 0.04
+            t.transform.translation.y = 0.
+            t.transform.translation.z = 0.05
+            q = se3.quaternion_from_euler(0, -self.gripper_open * np.pi / 2., 0)
+            t.transform.rotation.x = q[0]
+            t.transform.rotation.y = q[1]
+            t.transform.rotation.z = q[2]
+            t.transform.rotation.w = q[3]
+            tf_br.sendTransform(t)
         # publish torso in vrroom
         t = TransformStamped()
         t.header.stamp = time
@@ -304,8 +307,8 @@ class ArmControlNode:
         # Subscribers
         rospy.Subscriber("/oculus/button_a_toggle", ButtonToggle, self.deadmanswitch_toggle_callback)
         rospy.Subscriber("/oculus/button_b_toggle", ButtonToggle, self.zeroswitch_toggle_callback)
-        rospy.Subscriber("/oculus/left_gripper", ButtonToggle, self.left_gripperswitch_toggle_callback)
-        rospy.Subscriber("/oculus/right_gripper", ButtonToggle, self.right_gripperswitch_toggle_callback)
+        rospy.Subscriber("/oculus/left_gripper", Float32, self.left_gripperswitch_toggle_callback)
+        rospy.Subscriber("/oculus/right_gripper", Float32, self.right_gripperswitch_toggle_callback)
 
         # Timer
         rospy.Timer(rospy.Duration(0.01), self.arm_update_routine)
@@ -387,6 +390,9 @@ class ArmControlNode:
                 if self.virtual_arms[side] is not None:
                     joint_names.extend(self.virtual_arms[side].joint_names)
                     joint_angles.extend(self.virtual_arms[side].joint_angles)
+                    if self.virtual_arms[side].gripper_open is not None:
+                        joint_names.append(self.virtual_arms[side].gripper_name)
+                        joint_angles.append(self.virtual_arms[side].gripper_open)
             if joint_angles:
                 joint_angles_msg = JointAnglesWithSpeed()
                 joint_angles_msg.speed = kMaxArmSpeedRadPerSec
@@ -430,10 +436,12 @@ class ArmControlNode:
             pass
 
     def right_gripperswitch_toggle_callback(self, msg):
-        pass
+        if self.virtual_arms["right"] is not None:
+            self.virtual_arms["right"].gripper_open = np.clip(1.-msg.data, 0, 1)
 
     def left_gripperswitch_toggle_callback(self, msg):
-        pass
+        if self.virtual_arms["left"] is not None:
+            self.virtual_arms["left"].gripper_open = np.clip(1.-msg.data, 0, 1)
 
     def deadmanswitch_toggle_callback(self, msg):
         if msg.event == ButtonToggle.PRESSED:

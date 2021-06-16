@@ -12,6 +12,7 @@
 #include <geometry_msgs/TransformStamped.h>
 #include <ros/ros.h>
 #include <std_msgs/String.h>
+#include <std_msgs/Float32.h>
 #include <std_srvs/Trigger.h>
 #include <sensor_msgs/Joy.h>
 #include <geometry_msgs/Twist.h>
@@ -119,6 +120,8 @@ class OculusHeadController {
       const std::string kPepperPoseTopic = "/pepper_robot/pose/joint_angles";
       const std::string kButtonATopic = "/oculus/button_a_toggle";
       const std::string kButtonBTopic = "/oculus/button_b_toggle";
+      const std::string kLeftGripperTopic = "/oculus/left_gripper";
+      const std::string kRightGripperTopic = "/oculus/right_gripper";
       const std::string kCmdVelTopic = "/cmd_vel";
       kVRRoomFrame = "vrroom";
       kOdomFrame = "odom";
@@ -139,6 +142,8 @@ class OculusHeadController {
       pose_pub_ = nh_.advertise<naoqi_bridge_msgs::JointAnglesWithSpeed>(kPepperPoseTopic, 1);
       button_a_pub_ = nh_.advertise<pepper_surrogate::ButtonToggle>(kButtonATopic, 1);
       button_b_pub_ = nh_.advertise<pepper_surrogate::ButtonToggle>(kButtonBTopic, 1);
+      left_gripper_pub_ = nh_.advertise<std_msgs::Float32>(kLeftGripperTopic, 1);
+      right_gripper_pub_ = nh_.advertise<std_msgs::Float32>(kRightGripperTopic, 1);
       cmd_vel_pub_ = nh_.advertise<geometry_msgs::Twist>(kCmdVelTopic, 1);
 
       // Initialize times.
@@ -426,6 +431,14 @@ class OculusHeadController {
                   cmd_vel_msg.linear.x = deadzone(control_state[i], kLAnalogDeadzone) * kMaxBaseVelMPerS;
               } else if (strcmp(controls_fn_str[controls_fn[i]], "analog-x") == 0 && !is_left_controller) {
                   cmd_vel_msg.angular.z = -deadzone(control_state[i], kLAnalogDeadzone) * kMaxBaseRotRadPerS;
+              } else if (strcmp(controls_fn_str[controls_fn[i]], "squeeze") == 0 && is_left_controller) {
+                std_msgs::Float32 msg;
+                msg.data = control_state[i];
+                left_gripper_pub_.publish(msg);
+              } else if (strcmp(controls_fn_str[controls_fn[i]], "squeeze") == 0 && !is_left_controller) {
+                std_msgs::Float32 msg;
+                msg.data = control_state[i];
+                right_gripper_pub_.publish(msg);
               }
             }
 
@@ -560,6 +573,8 @@ class OculusHeadController {
     ros::Publisher pose_pub_;
     ros::Publisher button_a_pub_;
     ros::Publisher button_b_pub_;
+    ros::Publisher left_gripper_pub_;
+    ros::Publisher right_gripper_pub_;
     ros::Publisher cmd_vel_pub_;
     ros::Time pose_pub_last_publish_time_;
     tf2_ros::TransformBroadcaster br_;
