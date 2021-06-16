@@ -67,8 +67,8 @@ def calc_fk_and_jacob(angles, jacob=True, right=True, scale=1., full_pos=False):
     if not jacob:
         return pos, ori
 
-    OfstT1 = L1 * T1Abs.dot(v1)
-    OfstTd = TdAbs.dot(np.array([[L3], [L2], [0], [0]]))
+    OfstT1 = _L1_ * T1Abs.dot(v1)
+    OfstTd = TdAbs.dot(np.array([[L3], [_L2_], [0], [0]]))
     OfstT5 = L5 * T5Abs.dot(v0)
     OfstT6 = T5Abs.dot(np.array([[L6], [0], [-L7], [0]]))
 
