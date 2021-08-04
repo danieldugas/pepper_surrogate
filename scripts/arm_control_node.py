@@ -11,6 +11,7 @@ from naoqi_bridge_msgs.msg import JointAnglesWithSpeed
 from geometry_msgs.msg import TransformStamped
 
 import pepper_kinematics as pk
+from vicon_arm_calibration import load_vicon_calibration
 
 VIRTUALARM_SCALE = 1.8 # also change this value in urdf/01-virtualarm.xacro
 
@@ -57,6 +58,9 @@ kRightViconWristbandFrame = "vicon_right_wristband"
 kLeftViconArmbandFrame = "vicon_left_armband"
 kLeftViconWristbandFrame = "vicon_left_wristband"
 
+DEBUG_TRANSFORMS = True
+PUBLISH_DEBUG_TFS = True
+
 # controller frame != pepper hand frame even if the hands are superposed!
 # find static transformation between controller frame and pepper hand if it was holding the controller
 # rotate right along x axis (wrist axis)
@@ -66,7 +70,7 @@ se3_left_vrhand_in_controller = se3.rotation_matrix(-np.pi / 2., np.array([1., 0
 se3_left_vrhand_in_controller[2, 3] = -0.05
 
 def se3_from_transformstamped(trans):
-    """ 
+    """
     trans : TransformStamped
     M : 4x4 se3 matrix
     """
@@ -84,7 +88,7 @@ def se3_from_transformstamped(trans):
     return se3_from_transl_quat(transl, quat)
 
 def se3_from_transl_quat(transl, quat):
-    """ 
+    """
     transl : [x, y, z]
     quat : [x, y, z, w]
     M : 4x4 se3 matrix
@@ -101,12 +105,12 @@ def rot_mat_from_basis_vectors(x, y):
     # what if x and y are not perfectly orthogonal?
     if np.dot(xnorm, ynorm) > 0.01:
         print("Warning: basis vectors are not orthogonal")
-    znorm = np.cross(x, y)
+    znorm = np.cross(xnorm, ynorm)
     rotmat = np.stack([xnorm, ynorm, znorm]).T
     return rotmat
 
 def se3_from_pos_rot3(pos, rot):
-    """ 
+    """
     pos : [x, y, z]
     rot : 3x3 rot matrix
     M : 4x4 se3 matrix
@@ -118,7 +122,7 @@ def se3_from_pos_rot3(pos, rot):
 
 class VirtualArm:
     """ A virtual arm created in the VRRoom to mirror pepper's actual arm.
-    the virtual arm tracks the user's controller, and the resulting joint angles are sent 
+    the virtual arm tracks the user's controller, and the resulting joint angles are sent
     to pepper control """
     def __init__(self, side="right"):
         # parameters
@@ -173,26 +177,133 @@ class VirtualArm:
         )
         self.se3_virtual_torso_in_vrroom = se3_virtual_torso_in_vrroom
 
-    def vicon_update(self, se3_armband_in_vicon, se3_wristband_in_vicon, se3_torso_in_vicon, vicon_calib):
+    def vicon_update(self, se3_armband_in_vicon, se3_wristband_in_vicon, se3_torso_in_vicon, vicon_calib, tf_br):
         """ Update virtual arm based on vicon tracking """
         v_T_ab = se3_armband_in_vicon
         v_T_wb = se3_wristband_in_vicon
+        v_T_t = se3_torso_in_vicon
         if self.side == "right":
-            ab_T_s = vicon_calib.se3_right_shoulder_in_right_armband
+            t_T_s = vicon_calib.se3_right_shoulder_in_torso
             ab_T_e = vicon_calib.se3_right_elbow_in_right_armband
             wb_T_w = vicon_calib.se3_right_wrist_in_right_wristband
         else:
-            ab_T_s = vicon_calib.se3_left_shoulder_in_left_armband
+            t_T_s = vicon_calib.se3_left_shoulder_in_torso
             ab_T_e = vicon_calib.se3_left_elbow_in_left_armband
             wb_T_w = vicon_calib.se3_left_wrist_in_left_wristband
         # get shoulder, elbow, wrist transforms from calibration
-        v_T_s = np.dot(v_T_ab, ab_T_s) # true orientation
+        v_T_s = np.dot(v_T_t, t_T_s) # true orientation
         v_T_e = np.dot(v_T_ab, ab_T_e)
         v_T_w = np.dot(v_T_wb, wb_T_w)
-        # TODO
-
-        # update shoulder position
-#         self.se3_virtual_torso_in_vrroom =
+        # position-only in vicon frame
+        s = se3.translation_from_matrix(v_T_s)
+        e = se3.translation_from_matrix(v_T_e)
+        w = se3.translation_from_matrix(v_T_w)
+        # calculate elbow roll
+        ew = w - e
+        se = e - s
+        elbow_roll = np.arccos(np.dot(ew, se) / (np.linalg.norm(ew) * np.linalg.norm(se)))
+        # calculate shoulder roll
+        s_T_v = se3.inverse_matrix(v_T_s)
+        s_T_e = np.dot(s_T_v, v_T_e)
+        x, y, z = se3.translation_from_matrix(s_T_e) # in shoulder frame
+        if self.side == "right":
+            shoulder_roll = np.arccos(x / np.sqrt(x*x + y*y + z*z)) - np.pi / 2.
+        else:
+            shoulder_roll = np.pi / 2. - np.arccos(-x / np.sqrt(x*x + y*y + z*z))
+        # calculate shoulder pitch
+        shoulder_pitch = 0
+        if np.abs(shoulder_roll) < np.deg2rad(85):
+            shoulder_pitch = np.arctan2(z, y)
+        else:
+            if self.joint_angles is not None:
+                SHLDR_ANG_INDX = 0
+                shoulder_pitch = self.joint_angles[SHLDR_ANG_INDX]
+        # forward kinematics to get pepper arm orientation from shoulder
+        s_T_sb = se3_from_pos_rot3(np.array([0,0,0]), se3.euler_matrix(shoulder_pitch+np.pi/2., 0, 0)[:3, :3])
+        if self.side == "right":
+            sb_T_ao = se3_from_pos_rot3(np.array([0,0,0]), se3.euler_matrix(0, np.pi/2.+shoulder_roll, 0)[:3, :3])
+            ao_T_a = se3_from_pos_rot3(np.array([0.1,0,0]), se3.euler_matrix(0, 0, 0)[:3, :3])
+        else:
+            sb_T_ao = se3_from_pos_rot3(np.array([0,0,0]), se3.euler_matrix(0, -np.pi/2.+shoulder_roll, 0)[:3, :3])
+            ao_T_a = se3_from_pos_rot3(np.array([-0.1,0,0]), se3.euler_matrix(0, 0, 0)[:3, :3])
+        s_T_a = np.dot(np.dot(s_T_sb, sb_T_ao), ao_T_a)
+        v_T_a = np.dot(v_T_s, s_T_a)
+        a_T_v = se3.inverse_matrix(v_T_a)
+        # calculate elbow yaw
+        if not vicon_calib.is_armband_orientation_calibrated:
+            a_T_w = np.dot(a_T_v, v_T_w)
+            a_T_e = np.dot(a_T_v, v_T_e)
+            a_w = se3.translation_from_matrix(a_T_w) # in pepper arm frame
+            a_e = se3.translation_from_matrix(a_T_e)
+            x, y, z = a_w - a_e
+            elbow_yaw = 0
+            if np.abs(elbow_roll) > np.deg2rad(5):
+                if self.side == "right":
+                    elbow_yaw = np.arctan2(y, -z)
+                else:
+                    elbow_yaw = np.arctan2(y, z)
+            else:
+                if self.joint_angles is not None:
+                    ELBW_ANG_INDX = 2
+                    elbow_yaw = self.joint_angles[ELBW_ANG_INDX]
+        else: # elbow yaw from calibrated armband orientation (v_T_ab points toward elbow rotation plane)
+            a_T_ab = np.dot(a_T_v, v_T_ab)
+            elbow_yaw = se3.euler_from_matrix(a_T_ab)[0]
+        # try to map human wrist yaw to pepper wrist yaw
+        # get armband (desired) in virtual wrist (after ik) frame
+        WRST_ANG_IDX = 4
+        if self.side == "right":
+            arm_get_position = pk.right_arm_get_position
+            yaw_limits = [pk.get_right_arm_min_angles()[WRST_ANG_IDX],
+                          pk.get_right_arm_max_angles()[WRST_ANG_IDX]]
+        else:
+            arm_get_position = pk.left_arm_get_position
+            yaw_limits = [pk.get_left_arm_min_angles()[WRST_ANG_IDX],
+                          pk.get_left_arm_max_angles()[WRST_ANG_IDX]]
+        self.joint_angles = [shoulder_pitch, shoulder_roll, elbow_yaw, elbow_roll, 0]
+        # get wrist yaw (forward kinematics to wrist)
+        # x is the distal direction in the wrist and virtual_claw tf
+        pos_in_torso, ori_in_torso = arm_get_position(self.joint_angles, scale=self.scale, full_pos=True)
+        FRARM_IDX = 3 # joint_frames = ["LShoulder", "LBicep", "LElbow", "LForeArm", "l_wrist", "LHand"]
+        SHLDR_IDX = 0
+        se3_virtual_forearm_in_virtual_torso = se3_from_pos_rot3(pos_in_torso[FRARM_IDX],
+                                                                 ori_in_torso[FRARM_IDX])
+        se3_virtual_shoulder_in_virtual_torso = se3_from_pos_rot3(pos_in_torso[SHLDR_IDX],
+                                                                  ori_in_torso[SHLDR_IDX])
+        # update shoulder position virtual_torso-> virtual_shoulder == shoulder
+        # also vrroom <-> vicon
+        vs_T_vt = se3.inverse_matrix(se3_virtual_shoulder_in_virtual_torso)
+        s_T_vs = se3.euler_matrix(0, np.pi/2., np.pi / 2.) # vicon shoulder is x lateral, y anterior, z up
+        s_T_vt = np.dot(s_T_vs, vs_T_vt)
+        v_T_vt = np.dot(v_T_s, s_T_vt)
+        se3_virtual_torso_in_vicon = v_T_vt
+        self.se3_virtual_torso_in_vrroom = se3_virtual_torso_in_vicon
+        vt_T_v = se3.inverse_matrix(v_T_vt)
+        se3_wristband_in_virtual_torso = np.dot(vt_T_v, v_T_wb)
+        se3_virtual_torso_in_virtual_forearm = se3.inverse_matrix(se3_virtual_forearm_in_virtual_torso)
+        se3_wristband_in_virtual_forearm = np.dot(
+            se3_virtual_torso_in_virtual_forearm,
+            se3_wristband_in_virtual_torso
+        )
+        wrist_yaw, _, _ = se3.euler_from_matrix(se3_wristband_in_virtual_forearm)
+        wrist_yaw = np.clip(wrist_yaw, yaw_limits[0], yaw_limits[1])
+        self.joint_angles = [shoulder_pitch, shoulder_roll, elbow_yaw, elbow_roll, wrist_yaw]
+        if PUBLISH_DEBUG_TFS:
+            for T, name in zip([v_T_s, v_T_e, v_T_w, np.dot(v_T_s, s_T_sb), v_T_a], ["vicon_s", "vicon_e", "vicon_w", "vicon_sb", "vicon_a"]):
+                t = TransformStamped()
+                t.header.stamp = rospy.Time.now()
+                t.header.frame_id = kViconFrame
+                t.child_frame_id = self.side+name
+                pos = se3.translation_from_matrix(T)
+                t.transform.translation.x = pos[0]
+                t.transform.translation.y = pos[1]
+                t.transform.translation.z = pos[2]
+                q = se3.quaternion_from_matrix(T)
+                t.transform.rotation.x = q[0]
+                t.transform.rotation.y = q[1]
+                t.transform.rotation.z = q[2]
+                t.transform.rotation.w = q[3]
+                tf_br.sendTransform(t)
 
     def update(self, se3_controller_in_vrroom):
         """
@@ -245,14 +356,17 @@ class VirtualArm:
         WRST_ANG_IDX = 4
         if self.side == "right":
             arm_get_position = pk.right_arm_get_position
-            yaw_limits = [pk.get_right_arm_min_angles()[WRST_ANG_IDX], pk.get_right_arm_max_angles()[WRST_ANG_IDX]]
+            yaw_limits = [pk.get_right_arm_min_angles()[WRST_ANG_IDX],
+                          pk.get_right_arm_max_angles()[WRST_ANG_IDX]]
         else:
             arm_get_position = pk.left_arm_get_position
-            yaw_limits = [pk.get_left_arm_min_angles()[WRST_ANG_IDX], pk.get_left_arm_max_angles()[WRST_ANG_IDX]]
+            yaw_limits = [pk.get_left_arm_min_angles()[WRST_ANG_IDX],
+                          pk.get_left_arm_max_angles()[WRST_ANG_IDX]]
         # get position, orientation for every joint in arm
         pos_in_torso, ori_in_torso = arm_get_position(self.joint_angles, scale=self.scale, full_pos=True)
         FRARM_IDX = 3 # joint_frames = ["LShoulder", "LBicep", "LElbow", "LForeArm", "l_wrist", "LHand"]
-        se3_virtual_forearm_in_virtual_torso = se3_from_pos_rot3(pos_in_torso[FRARM_IDX], ori_in_torso[FRARM_IDX])
+        se3_virtual_forearm_in_virtual_torso = se3_from_pos_rot3(pos_in_torso[FRARM_IDX],
+                                                                 ori_in_torso[FRARM_IDX])
         se3_virtual_torso_in_virtual_forearm = se3.inverse_matrix(se3_virtual_forearm_in_virtual_torso)
         se3_virtual_claw_in_virtual_forearm = np.dot(
             se3_virtual_torso_in_virtual_forearm,
@@ -335,19 +449,22 @@ class ArmControlNode:
     # moving arms to zero -> awaiting user ready -> initialize virtual arm
     # track virtual arm
     def __init__(self):
-        rospy.init_node("stereo_cameras")
+        rospy.init_node("arm_control_node")
 
         # options
-        self.vicon_tracking = False
+        self.vicon_tracking = rospy.get_param("~vicon_tracking", default=False)
         self.vicon_calib_file = "config/vicon_calibration.pckl"
         self.vicon_calib = load_vicon_calibration(self.vicon_calib_file) if self.vicon_tracking else None
 
         # variables
         self.virtual_arms = {"right": None, "left": None}
         self.current_state = "idle"
+        if self.vicon_tracking:
+            self.current_state = "tracking"
 
         # publishers
-        self.joint_angles_pub = rospy.Publisher("/pepper_robot/pose/joint_angles", JointAnglesWithSpeed, queue_size=1)
+        self.joint_angles_pub = rospy.Publisher("/pepper_robot/pose/joint_angles",
+                                                JointAnglesWithSpeed, queue_size=1)
         self.tf_br = tf2_ros.TransformBroadcaster()
 
         # tf listener
@@ -405,14 +522,22 @@ class ArmControlNode:
         if child_frame is None:
             return None
         se3_child_in_parent = None
-        if self.current_state in ["tracking", "trackingactive", "zero"]:
-            try:
-                trans = self.tf_buf.lookup_transform(parent_frame, child_frame, rospy.Time())
-            except (tf2_ros.LookupException, tf2_ros.ConnectivityException,
-                    tf2_ros.ExtrapolationException) as e:
-                print(e)
-                return None
-            se3_child_in_parent = se3_from_transformstamped(trans)
+        if DEBUG_TRANSFORMS:
+            if child_frame == kRightViconArmbandFrame:
+                return se3_from_pos_rot3(np.array([1, 0, 0]), se3.euler_matrix(0,0.9,0)[:3, :3])
+            if child_frame == kRightViconWristbandFrame:
+                return se3_from_pos_rot3(np.array([1.5, 0.3, 0]), se3.euler_matrix(0,0,0.3)[:3, :3])
+            if child_frame == kLeftViconArmbandFrame:
+                return se3_from_pos_rot3(np.array([0, 0, 0]), se3.euler_matrix(0,0.9,np.pi)[:3, :3])
+            if child_frame == kLeftViconWristbandFrame:
+                return se3_from_pos_rot3(np.array([-0.5, 0.3, 0]), se3.euler_matrix(0,0.9,np.pi)[:3, :3])
+        try:
+            trans = self.tf_buf.lookup_transform(parent_frame, child_frame, rospy.Time())
+        except (tf2_ros.LookupException, tf2_ros.ConnectivityException,
+                tf2_ros.ExtrapolationException) as e:
+            print(e)
+            return None
+        se3_child_in_parent = se3_from_transformstamped(trans)
         return se3_child_in_parent
 
     def infer_torso_frame(self):
@@ -473,20 +598,26 @@ class ArmControlNode:
         # for each hand
         for side in ["right", "left"]:
             # get tfs of tracking markers (oculus controllers or vicon)
-            if self.vicon_tracking:
-                armband_frame = kRightViconArmbandFrame if side == "right" else kLeftViconArmbandFrame
-                wristband_frame = kRightViconWristbandFrame if side == "right" else kLeftViconWristbandFrame
-                torso_frame = kViconTorsoFrame
-                se3_armband_in_vicon = self.get_latest_tf(kViconFrame, armband_frame)
-                se3_wristband_in_vicon = self.get_latest_tf(kViconFrame, wristband_frame)
-                se3_torso_in_vicon = self.get_latest_tf(kViconFrame, torso_frame)
-                if se3_torso_in_vicon is None or self.vicon_calib.se3_left_shoulder_in_torso is None:
-                    se3_torso_in_vicon = self.infer_torso_frame()
-            else:
-                controller_frame = kRightControllerFrame if side == "right" else kLeftControllerFrame
-                se3_controller_in_vrroom = self.get_latest_tf(kVRRoomFrame, controller_frame)
-                if se3_controller_in_vrroom is None:
-                    return
+            if self.current_state in ["tracking", "trackingactive", "zero"]:
+                if self.vicon_tracking:
+                    if self.virtual_arms[side] is None:
+                        self.virtual_arms[side] = VirtualArm(side=side)
+                    armband_frame = kRightViconArmbandFrame if side == "right" else kLeftViconArmbandFrame
+                    wristband_frame = kRightViconWristbandFrame if side == "right" else kLeftViconWristbandFrame
+                    torso_frame = kViconTorsoFrame
+                    se3_armband_in_vicon = self.get_latest_tf(kViconFrame, armband_frame)
+                    se3_wristband_in_vicon = self.get_latest_tf(kViconFrame, wristband_frame)
+                    se3_torso_in_vicon = self.get_latest_tf(kViconFrame, torso_frame)
+                    if se3_armband_in_vicon is None or se3_wristband_in_vicon is None:
+                        rospy.logwarn_throttle(2, side + " arm vicon marker transforms not found")
+                        continue
+                    if se3_torso_in_vicon is None or self.vicon_calib.se3_left_shoulder_in_torso is None:
+                        se3_torso_in_vicon = self.infer_torso_frame()
+                else:
+                    controller_frame = kRightControllerFrame if side == "right" else kLeftControllerFrame
+                    se3_controller_in_vrroom = self.get_latest_tf(kVRRoomFrame, controller_frame)
+                    if se3_controller_in_vrroom is None:
+                        return
 
             # update virtual arm angles
             if self.current_state in ["tracking", "trackingactive"]:
@@ -494,7 +625,9 @@ class ArmControlNode:
                 if self.virtual_arms[side] is not None:
                     if self.vicon_tracking:
                         self.virtual_arms[side].vicon_update(se3_armband_in_vicon, se3_wristband_in_vicon,
-                                                             se3_torso_in_vicon, self.vicon_calib)
+                                                             se3_torso_in_vicon, self.vicon_calib,
+                                                             self.tf_br
+                                                             )
                     else:
                         self.virtual_arms[side].update(se3_controller_in_vrroom)
                     self.virtual_arms[side].visualize(self.tf_br)
@@ -503,7 +636,8 @@ class ArmControlNode:
                 # create new temporary virtual arm and display it
                 # when confirm button is pressed the temporary arm will become permanent and joints unlocked
                 self.virtual_arms[side] = VirtualArm(side=side)
-                self.virtual_arms[side].initialize_from_zero_pose_forward_kinematics(se3_controller_in_vrroom, self.tf_br)
+                self.virtual_arms[side].initialize_from_zero_pose_forward_kinematics(
+                    se3_controller_in_vrroom, self.tf_br)
                 self.virtual_arms[side].visualize(self.tf_br)
 
     def arm_control_routine(self, event=None):
