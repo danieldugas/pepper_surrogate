@@ -58,8 +58,8 @@ kRightViconWristbandFrame = "vicon_right_wristband"
 kLeftViconArmbandFrame = "vicon_left_armband"
 kLeftViconWristbandFrame = "vicon_left_wristband"
 
-DEBUG_TRANSFORMS = True
-PUBLISH_DEBUG_TFS = True
+DEBUG_TRANSFORMS = False # replaces true vicon transform with static made-up ones for testing
+PUBLISH_DEBUG_TFS = True # publishes extra tfs which are useful for debugging
 
 # controller frame != pepper hand frame even if the hands are superposed!
 # find static transformation between controller frame and pepper hand if it was holding the controller
