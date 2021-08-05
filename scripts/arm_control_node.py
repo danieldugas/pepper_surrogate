@@ -272,6 +272,7 @@ class VirtualArm:
         FRARM_IDX = 3 # joint_frames = ["LShoulder", "LBicep", "LElbow", "LForeArm", "l_wrist", "LHand"]
         se3_virtual_forearm_in_virtual_torso = se3_from_pos_rot3(pos_in_torso[FRARM_IDX],
                                                                  ori_in_torso[FRARM_IDX])
+        se3_virtual_torso_in_virtual_forearm = se3.inverse_matrix(se3_virtual_forearm_in_virtual_torso)
         # update shoulder position virtual_torso-> virtual_shoulder == shoulder
         # vicon shoulder is fixed wrt torso, but virtual shoulder is not (same as armball)
         # therefore shoulder <-static-> virtual_torso -> virtual shoulder
@@ -286,26 +287,39 @@ class VirtualArm:
         vr_T_vt = np.dot(vr_T_v, v_T_vt)
         self.se3_virtual_torso_in_vrroom = vr_T_vt
         vt_T_v = se3.inverse_matrix(v_T_vt)
-        se3_wristband_in_virtual_torso = np.dot(vt_T_v, v_T_wb)
-        se3_virtual_torso_in_virtual_forearm = se3.inverse_matrix(se3_virtual_forearm_in_virtual_torso)
-        se3_wristband_in_virtual_forearm = np.dot(
+        # we need to transform from wristband -> controller -> vrhand
+        if self.side == "right":
+            wb_T_c = se3.identity_matrix()
+            c_frame = kRightControllerFrame
+            c_T_h = se3_right_vrhand_in_controller
+        else:
+            wb_T_c = se3.identity_matrix()
+            c_frame = kLeftControllerFrame
+            c_T_h = se3_left_vrhand_in_controller
+        v_T_c = np.dot(v_T_wb, wb_T_c)
+        v_T_h = np.dot(v_T_c, c_T_h)
+        vt_T_h = np.dot(vt_T_v, v_T_h)
+        se3_vrhand_in_virtual_torso = vt_T_h
+        se3_vrhand_in_virtual_forearm = np.dot(
             se3_virtual_torso_in_virtual_forearm,
-            se3_wristband_in_virtual_torso
+            se3_vrhand_in_virtual_torso
         )
-        wrist_yaw, _, _ = se3.euler_from_matrix(se3_wristband_in_virtual_forearm)
+        wrist_yaw, _, _ = se3.euler_from_matrix(se3_vrhand_in_virtual_forearm)
         wrist_yaw = np.clip(wrist_yaw, yaw_limits[0], yaw_limits[1])
         self.joint_angles = [shoulder_pitch, shoulder_roll, elbow_yaw, elbow_roll, wrist_yaw]
         # publish tfs for joints used in vicon calculations
+        # at the end, we publish a static tf for vrroom in vicon, which allows showing the virtual arms
         v_T_vr = VRROOM_IN_VICON
+        # publish if desired
         if PUBLISH_DEBUG_TFS:
             for T, name in zip(
-                [v_T_s, v_T_e, v_T_w, np.dot(v_T_s, s_T_sb), v_T_a, v_T_vr],
-                ["vicon_s", "vicon_e", "vicon_w", "vicon_sb", "vicon_a", kVRRoomFrame],
+                [v_T_s, v_T_e, v_T_w, np.dot(v_T_s, s_T_sb), v_T_a, v_T_vr, v_T_c],
+                ["vicon_s", "vicon_e", "vicon_w", "vicon_sb", "vicon_a", kVRRoomFrame, c_frame],
             ):
                 t = TransformStamped()
                 t.header.stamp = rospy.Time.now()
                 t.header.frame_id = kViconFrame
-                t.child_frame_id = self.side+name if name != kVRRoomFrame else name
+                t.child_frame_id = self.side+name if name not in [kVRRoomFrame, c_frame] else name
                 pos = se3.translation_from_matrix(T)
                 t.transform.translation.x = pos[0]
                 t.transform.translation.y = pos[1]
