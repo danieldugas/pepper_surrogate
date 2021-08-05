@@ -60,6 +60,7 @@ kLeftViconWristbandFrame = "vicon_left_wristband"
 
 DEBUG_TRANSFORMS = False # replaces true vicon transform with static made-up ones for testing
 PUBLISH_DEBUG_TFS = True # publishes extra tfs which are useful for debugging
+VRROOM_IN_VICON = se3.translation_matrix([1, 1, 0])
 
 # controller frame != pepper hand frame even if the hands are superposed!
 # find static transformation between controller frame and pepper hand if it was holding the controller
@@ -177,7 +178,8 @@ class VirtualArm:
         )
         self.se3_virtual_torso_in_vrroom = se3_virtual_torso_in_vrroom
 
-    def vicon_update(self, se3_armband_in_vicon, se3_wristband_in_vicon, se3_torso_in_vicon, vicon_calib, tf_br):
+    def vicon_update(self, se3_armband_in_vicon, se3_wristband_in_vicon, se3_torso_in_vicon,
+                     vicon_calib, tf_br):
         """ Update virtual arm based on vicon tracking """
         v_T_ab = se3_armband_in_vicon
         v_T_wb = se3_wristband_in_vicon
@@ -213,18 +215,21 @@ class VirtualArm:
         # calculate shoulder pitch
         shoulder_pitch = 0
         if np.abs(shoulder_roll) < np.deg2rad(85):
-            shoulder_pitch = np.arctan2(z, y)
+            shoulder_pitch = -np.arctan2(z, y)
         else:
             if self.joint_angles is not None:
                 SHLDR_ANG_INDX = 0
                 shoulder_pitch = self.joint_angles[SHLDR_ANG_INDX]
         # forward kinematics to get pepper arm orientation from shoulder
-        s_T_sb = se3_from_pos_rot3(np.array([0,0,0]), se3.euler_matrix(shoulder_pitch+np.pi/2., 0, 0)[:3, :3])
+        x_angle = -shoulder_pitch+np.pi/2.
+        s_T_sb = se3_from_pos_rot3(np.array([0,0,0]), se3.euler_matrix(x_angle, 0, 0)[:3, :3])
         if self.side == "right":
-            sb_T_ao = se3_from_pos_rot3(np.array([0,0,0]), se3.euler_matrix(0, np.pi/2.+shoulder_roll, 0)[:3, :3])
+            y_angle = np.pi/2.+shoulder_roll
+            sb_T_ao = se3_from_pos_rot3(np.array([0,0,0]), se3.euler_matrix(0, y_angle, 0)[:3, :3])
             ao_T_a = se3_from_pos_rot3(np.array([0.1,0,0]), se3.euler_matrix(0, 0, 0)[:3, :3])
         else:
-            sb_T_ao = se3_from_pos_rot3(np.array([0,0,0]), se3.euler_matrix(0, -np.pi/2.+shoulder_roll, 0)[:3, :3])
+            y_angle = -np.pi/2.+shoulder_roll
+            sb_T_ao = se3_from_pos_rot3(np.array([0,0,0]), se3.euler_matrix(0, y_angle, 0)[:3, :3])
             ao_T_a = se3_from_pos_rot3(np.array([-0.1,0,0]), se3.euler_matrix(0, 0, 0)[:3, :3])
         s_T_a = np.dot(np.dot(s_T_sb, sb_T_ao), ao_T_a)
         v_T_a = np.dot(v_T_s, s_T_a)
@@ -265,19 +270,21 @@ class VirtualArm:
         # x is the distal direction in the wrist and virtual_claw tf
         pos_in_torso, ori_in_torso = arm_get_position(self.joint_angles, scale=self.scale, full_pos=True)
         FRARM_IDX = 3 # joint_frames = ["LShoulder", "LBicep", "LElbow", "LForeArm", "l_wrist", "LHand"]
-        SHLDR_IDX = 0
         se3_virtual_forearm_in_virtual_torso = se3_from_pos_rot3(pos_in_torso[FRARM_IDX],
                                                                  ori_in_torso[FRARM_IDX])
-        se3_virtual_shoulder_in_virtual_torso = se3_from_pos_rot3(pos_in_torso[SHLDR_IDX],
-                                                                  ori_in_torso[SHLDR_IDX])
         # update shoulder position virtual_torso-> virtual_shoulder == shoulder
+        # vicon shoulder is fixed wrt torso, but virtual shoulder is not (same as armball)
+        # therefore shoulder <-static-> virtual_torso -> virtual shoulder
         # also vrroom <-> vicon
-        vs_T_vt = se3.inverse_matrix(se3_virtual_shoulder_in_virtual_torso)
-        s_T_vs = se3.euler_matrix(0, np.pi/2., np.pi / 2.) # vicon shoulder is x lateral, y anterior, z up
-        s_T_vt = np.dot(s_T_vs, vs_T_vt)
-        v_T_vt = np.dot(v_T_s, s_T_vt)
-        se3_virtual_torso_in_vicon = v_T_vt
-        self.se3_virtual_torso_in_vrroom = se3_virtual_torso_in_vicon
+        d = pk.fk.joint_distances[0] * self.scale
+        if self.side == "right":
+            s_T_vt = se3_from_pos_rot3(np.array([-d, 0, 0]), se3.euler_matrix(0, 0, np.pi/2.)[:3, :3])
+        if self.side == "left":
+            s_T_vt = se3_from_pos_rot3(np.array([d, 0, 0]), se3.euler_matrix(0, 0, np.pi/2.)[:3, :3])
+        v_T_vt = np.dot(v_T_s, s_T_vt) # virtual torso in vicon
+        vr_T_v = se3.inverse_matrix(VRROOM_IN_VICON)
+        vr_T_vt = np.dot(vr_T_v, v_T_vt)
+        self.se3_virtual_torso_in_vrroom = vr_T_vt
         vt_T_v = se3.inverse_matrix(v_T_vt)
         se3_wristband_in_virtual_torso = np.dot(vt_T_v, v_T_wb)
         se3_virtual_torso_in_virtual_forearm = se3.inverse_matrix(se3_virtual_forearm_in_virtual_torso)
@@ -288,12 +295,17 @@ class VirtualArm:
         wrist_yaw, _, _ = se3.euler_from_matrix(se3_wristband_in_virtual_forearm)
         wrist_yaw = np.clip(wrist_yaw, yaw_limits[0], yaw_limits[1])
         self.joint_angles = [shoulder_pitch, shoulder_roll, elbow_yaw, elbow_roll, wrist_yaw]
+        # publish tfs for joints used in vicon calculations
+        v_T_vr = VRROOM_IN_VICON
         if PUBLISH_DEBUG_TFS:
-            for T, name in zip([v_T_s, v_T_e, v_T_w, np.dot(v_T_s, s_T_sb), v_T_a], ["vicon_s", "vicon_e", "vicon_w", "vicon_sb", "vicon_a"]):
+            for T, name in zip(
+                [v_T_s, v_T_e, v_T_w, np.dot(v_T_s, s_T_sb), v_T_a, v_T_vr],
+                ["vicon_s", "vicon_e", "vicon_w", "vicon_sb", "vicon_a", kVRRoomFrame],
+            ):
                 t = TransformStamped()
                 t.header.stamp = rospy.Time.now()
                 t.header.frame_id = kViconFrame
-                t.child_frame_id = self.side+name
+                t.child_frame_id = self.side+name if name != kVRRoomFrame else name
                 pos = se3.translation_from_matrix(T)
                 t.transform.translation.x = pos[0]
                 t.transform.translation.y = pos[1]
@@ -524,9 +536,9 @@ class ArmControlNode:
         se3_child_in_parent = None
         if DEBUG_TRANSFORMS:
             if child_frame == kRightViconArmbandFrame:
-                return se3_from_pos_rot3(np.array([1, 0, 0]), se3.euler_matrix(0,0.9,0)[:3, :3])
+                return se3_from_pos_rot3(np.array([1, 0.2, 0]), se3.euler_matrix(0,0.9,0.8)[:3, :3])
             if child_frame == kRightViconWristbandFrame:
-                return se3_from_pos_rot3(np.array([1.5, 0.3, 0]), se3.euler_matrix(0,0,0.3)[:3, :3])
+                return se3_from_pos_rot3(np.array([1.5, 1., 0]), se3.euler_matrix(0,0,0.3)[:3, :3])
             if child_frame == kLeftViconArmbandFrame:
                 return se3_from_pos_rot3(np.array([0, 0, 0]), se3.euler_matrix(0,0.9,np.pi)[:3, :3])
             if child_frame == kLeftViconWristbandFrame:
@@ -603,7 +615,8 @@ class ArmControlNode:
                     if self.virtual_arms[side] is None:
                         self.virtual_arms[side] = VirtualArm(side=side)
                     armband_frame = kRightViconArmbandFrame if side == "right" else kLeftViconArmbandFrame
-                    wristband_frame = kRightViconWristbandFrame if side == "right" else kLeftViconWristbandFrame
+                    wristband_frame = (kRightViconWristbandFrame if side == "right"
+                                       else kLeftViconWristbandFrame)
                     torso_frame = kViconTorsoFrame
                     se3_armband_in_vicon = self.get_latest_tf(kViconFrame, armband_frame)
                     se3_wristband_in_vicon = self.get_latest_tf(kViconFrame, wristband_frame)
@@ -724,5 +737,6 @@ class ArmControlNode:
 
 
 if __name__ == "__main__":
+    np.set_printoptions(precision=2, suppress=True)
     node = ArmControlNode()
     rospy.spin()
