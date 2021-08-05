@@ -14,7 +14,7 @@
 <!--   </node> -->
 
   <param name="use_sim_time" value="true" />
-  <node pkg="rosbag" type="play" name="player" output="screen" args="--clock $(find pepper_surrogate)/rosbags/vicon_both_arms_test.bag"/>
+  <node pkg="rosbag" type="play" name="player" output="screen" args="-r 0.2 -l -s 10 --clock $(find pepper_surrogate)/rosbags/vicon_both_arms_test_corrected.bag"/>
 
 <!--   Arm control -->
   <node pkg="pepper_surrogate" type="arm_control_node.py" name="vicon_tracker_node">
