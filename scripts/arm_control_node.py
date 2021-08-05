@@ -50,13 +50,13 @@ kRightControllerFrame = "oculus_right_controller"
 kLeftControllerFrame = "oculus_left_controller"
 kMaxArmSpeedRadPerSec = 0.1
 
-kViconFrame = "vicon"
+kViconFrame = "vicon/world"
 kViconTorsoFrame = None # we don't have a vicon marker there
-kViconInferredTorsoFrame = "vicon_inferred_torso" # used only for publishing debug info
-kRightViconArmbandFrame = "vicon_right_armband"
-kRightViconWristbandFrame = "vicon_right_wristband"
-kLeftViconArmbandFrame = "vicon_left_armband"
-kLeftViconWristbandFrame = "vicon_left_wristband"
+kViconInferredTorsoFrame = "vicon/vicon_inferred_torso" # used only for publishing debug info
+kRightViconArmbandFrame = "vicon/vicon_right_armband/vicon_right_armband"
+kRightViconWristbandFrame = "vicon/vicon_right_wristband/vicon_right_wristband"
+kLeftViconArmbandFrame = "vicon/vicon_left_armband/vicon_left_armband"
+kLeftViconWristbandFrame = "vicon/vicon_left_wristband/vicon_left_wristband"
 
 DEBUG_TRANSFORMS = False # replaces true vicon transform with static made-up ones for testing
 PUBLISH_DEBUG_TFS = True # publishes extra tfs which are useful for debugging

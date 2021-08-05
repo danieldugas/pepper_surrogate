@@ -8,10 +8,13 @@
   <param name="oculus_description" command="$(find xacro)/xacro $(arg oculus_model)" />
 
 <!--   Oculus and Head Control -->
-  <node pkg="pepper_surrogate" type="head_control_node" name="head_control_node">
-    <param name="verbosity" value="1"/>
+<!--   <node pkg="pepper_surrogate" type="head_control_node" name="head_control_node"> -->
+<!--     <param name="verbosity" value="1"/> -->
 <!--     <remap from="/cmd_vel" to="/desired_cmd_vel" /> -->
-  </node>
+<!--   </node> -->
+
+  <param name="use_sim_time" value="true" />
+  <node pkg="rosbag" type="play" name="player" output="screen" args="--clock $(find pepper_surrogate)/rosbags/vicon_right_arm_test.bag"/>
 
 <!--   Arm control -->
   <node pkg="pepper_surrogate" type="arm_control_node.py" name="vicon_tracker_node">
