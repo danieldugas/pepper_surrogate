@@ -2,6 +2,8 @@
 <launch>
 
 <!--   URDF -->
+  <arg name="vicon_tracking" default="false"/>
+
   <arg name="virtualarm_model" default="$(find pepper_surrogate)/urdf/01-virtualarm.xacro"/>
   <param name="virtualarm_description" command="$(find xacro)/xacro $(arg virtualarm_model)" />
   <arg name="oculus_model" default="$(find pepper_surrogate)/urdf/02-oculus.urdf"/>
@@ -25,7 +27,9 @@
   </node>
 
 <!--   Arm control -->
-  <node pkg="pepper_surrogate" type="arm_control_node.py" name="arm_control_node"/>
+  <node pkg="pepper_surrogate" type="arm_control_node.py" name="arm_control_node">
+    <param name="vicon_tracking" value="$(arg vicon_tracking)"/>
+  </node>
 
 <!--   Minimap TODO: use refmap + map_matcher instead of gmapping -->
   <include file="$(find asl_pepper_gmapping)/launch/gmapping.launch" >

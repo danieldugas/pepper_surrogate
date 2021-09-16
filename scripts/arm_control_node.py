@@ -57,6 +57,8 @@ kRightViconArmbandFrame = "vicon/vicon_right_armband/vicon_right_armband"
 kRightViconWristbandFrame = "vicon/vicon_right_wristband/vicon_right_wristband"
 kLeftViconArmbandFrame = "vicon/vicon_left_armband/vicon_left_armband"
 kLeftViconWristbandFrame = "vicon/vicon_left_wristband/vicon_left_wristband"
+kRightViconControllerFrame = "vicon/oculus_right_controller"
+kLeftViconControllerFrame = "vicon/oculus_left_controller"
 
 DEBUG_TRANSFORMS = False # replaces true vicon transform with static made-up ones for testing
 PUBLISH_DEBUG_TFS = True # publishes extra tfs which are useful for debugging
@@ -290,11 +292,11 @@ class VirtualArm:
         # we need to transform from wristband -> controller -> vrhand
         if self.side == "right":
             wb_T_c = se3.identity_matrix()
-            c_frame = kRightControllerFrame
+            c_frame = kRightViconControllerFrame
             c_T_h = se3_right_vrhand_in_controller
         else:
             wb_T_c = se3.identity_matrix()
-            c_frame = kLeftControllerFrame
+            c_frame = kLeftViconControllerFrame
             c_T_h = se3_left_vrhand_in_controller
         v_T_c = np.dot(v_T_wb, wb_T_c)
         v_T_h = np.dot(v_T_c, c_T_h)
@@ -310,16 +312,32 @@ class VirtualArm:
         # publish tfs for joints used in vicon calculations
         # at the end, we publish a static tf for vrroom in vicon, which allows showing the virtual arms
         v_T_vr = VRROOM_IN_VICON
+        vr_T_v = se3.inverse_matrix(v_T_vr)
+        T = vr_T_v
+        t = TransformStamped()
+        t.header.stamp = rospy.Time.now()
+        t.header.frame_id = kVRRoomFrame
+        t.child_frame_id = kViconFrame
+        pos = se3.translation_from_matrix(T)
+        t.transform.translation.x = pos[0]
+        t.transform.translation.y = pos[1]
+        t.transform.translation.z = pos[2]
+        q = se3.quaternion_from_matrix(T)
+        t.transform.rotation.x = q[0]
+        t.transform.rotation.y = q[1]
+        t.transform.rotation.z = q[2]
+        t.transform.rotation.w = q[3]
+        tf_br.sendTransform(t)
         # publish if desired
         if PUBLISH_DEBUG_TFS:
             for T, name in zip(
-                [v_T_s, v_T_e, v_T_w, np.dot(v_T_s, s_T_sb), v_T_a, v_T_vr, v_T_c],
-                ["vicon_s", "vicon_e", "vicon_w", "vicon_sb", "vicon_a", kVRRoomFrame, c_frame],
+                [v_T_s, v_T_e, v_T_w, np.dot(v_T_s, s_T_sb), v_T_a, v_T_c],
+                ["vicon_s", "vicon_e", "vicon_w", "vicon_sb", "vicon_a", c_frame],
             ):
                 t = TransformStamped()
                 t.header.stamp = rospy.Time.now()
                 t.header.frame_id = kViconFrame
-                t.child_frame_id = self.side+name if name not in [kVRRoomFrame, c_frame] else name
+                t.child_frame_id = self.side+name if name != c_frame else name
                 pos = se3.translation_from_matrix(T)
                 t.transform.translation.x = pos[0]
                 t.transform.translation.y = pos[1]
@@ -517,6 +535,8 @@ class ArmControlNode:
         t = TransformStamped()
         t.header.stamp = rospy.Time.now()
         t.header.frame_id = kRightControllerFrame
+        if self.vicon_tracking:
+            t.header.frame_id = kRightViconControllerFrame
         t.child_frame_id = "oculus_right_vrhand"
         pos = se3.translation_from_matrix(se3_right_vrhand_in_controller)
         t.transform.translation.x = pos[0]
@@ -532,6 +552,8 @@ class ArmControlNode:
         t = TransformStamped()
         t.header.stamp = rospy.Time.now()
         t.header.frame_id = kLeftControllerFrame
+        if self.vicon_tracking:
+            t.header.frame_id = kLeftViconControllerFrame
         t.child_frame_id = "oculus_left_vrhand"
         pos = se3.translation_from_matrix(se3_left_vrhand_in_controller)
         t.transform.translation.x = pos[0]
