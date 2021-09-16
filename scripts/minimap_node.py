@@ -29,7 +29,6 @@ class MinimapNode:
         # vars
         self.goal_xy_in_refmap = None
         self.cv_bridge = CvBridge()
-        self.set_goal_msg = None
         # publishers
         self.image_publisher = rospy.Publisher("/pepper_surrogate/minimap", Image, queue_size=1)
         # tf
@@ -58,7 +57,20 @@ class MinimapNode:
 
     def global_goal_callback(self, msg): # x y is in the global map frame
         rospy.loginfo("set_goal message received")
-        self.set_goal_msg = msg
+        set_goal_msg = msg
+        try:
+            time = rospy.Time.now()
+            tf_info = [self.refmap_manager.kRefMapFrame, set_goal_msg.header.frame_id, time]
+            self.tf_listener.waitForTransform(*(tf_info + [self.tf_timeout]))
+            tf_msg_in_refmap = self.tf_listener.lookupTransform(*tf_info)
+        except (tf.LookupException, tf.ConnectivityException, tf.ExtrapolationException,
+                TransformException) as e:
+            print("[{}.{}] tf to refmap frame for time {}.{} not found: {}".format(
+                rospy.Time.now().secs, rospy.Time.now().nsecs, time.secs, time.nsecs, e))
+            return
+        pose2d_msg_in_refmap = Pose2D(tf_msg_in_refmap)
+        self.goal_xy_in_refmap = apply_tf(np.array([set_goal_msg.pose.position.x,
+                                                    set_goal_msg.pose.position.y]), pose2d_msg_in_refmap)
 
     def mainloop(self, event=None):
         R = np.zeros((self.kMinimapWidthPx, self.kMinimapHeightPx))
@@ -67,16 +79,16 @@ class MinimapNode:
         A = np.ones((self.kMinimapWidthPx, self.kMinimapHeightPx))
         if self.refmap_manager.tf_frame_in_refmap is None:
             # white noise with text "location unknown"
-            O = np.random.uniform(size=R.shape)
-            R = O * 1.
-            G = O * 1.
-            B = O * 1.
+            O_ = np.random.uniform(size=R.shape)
+            R = O_ * 1.
+            G = O_ * 1.
+            B = O_ * 1.
         elif self.refmap_manager.map_8ds is None:
             # white noise with text "map unknown"
-            O = np.random.uniform(size=R.shape)
-            R = O * 1.
-            G = O * 1.
-            B = O * 1.
+            O_ = np.random.uniform(size=R.shape)
+            R = O_ * 1.
+            G = O_ * 1.
+            B = O_ * 1.
         else:
             # everything in minimap frame (minimap is Map2D with base_footprint as origin)
             resolution = self.kMinimapRadiusM * 2. / self.kMinimapWidthPx
@@ -106,7 +118,8 @@ class MinimapNode:
             pixel_ij_in_minimap = as_idx_array(self.minimap2d.occupancy(), axis='all').reshape((-1, 2))
             pixel_xy_in_minimap = self.minimap2d.ij_to_xy(pixel_ij_in_minimap)
             pixel_xy_in_refmap = np.ascontiguousarray(apply_tf(pixel_xy_in_minimap, pose2d_minimap_in_refmap))
-            pixel_ij_in_refmap = self.refmap_manager.map_8ds.xy_to_ij(pixel_xy_in_refmap, clip_if_outside=True)
+            pixel_ij_in_refmap = self.refmap_manager.map_8ds.xy_to_ij(pixel_xy_in_refmap,
+                                                                      clip_if_outside=True)
             try:
                 pixel_values = self.refmap_manager.map_8ds.occupancy()[(pixel_ij_in_refmap[:, 0],
                                                                        pixel_ij_in_refmap[:, 1])]
@@ -129,7 +142,7 @@ class MinimapNode:
             A = np.ones_like(R)
             if FASTMARCH:
                 from matplotlib import pyplot as plt
-                normalizer = np.nanmax(fm[fm!=np.inf])
+                normalizer = np.nanmax(fm[fm != np.inf])
                 colors = plt.cm.viridis(fastmarch_values / normalizer)
                 R = colors[:, :, 0]
                 G = colors[:, :, 1]
@@ -149,22 +162,11 @@ class MinimapNode:
         B[stencil] = 0.3
 
         # goal stencil
-        if self.set_goal_msg is not None:
-            try:
-                time = rospy.Time.now()
-                tf_info = [self.refmap_manager.kRefMapFrame, self.set_goal_msg.header.frame_id, time]
-                self.tf_listener.waitForTransform(*(tf_info + [self.tf_timeout]))
-                tf_msg_in_refmap = self.tf_listener.lookupTransform(*tf_info)
-            except (tf.LookupException, tf.ConnectivityException, tf.ExtrapolationException,
-                    TransformException) as e:
-                print("[{}.{}] tf to refmap frame for time {}.{} not found: {}".format(
-                    rospy.Time.now().secs, rospy.Time.now().nsecs, time.secs, time.nsecs, e))
-                return
-            pose2d_msg_in_refmap = Pose2D(tf_msg_in_refmap)
-            goal_xy_in_refmap = apply_tf(np.array([self.set_goal_msg.pose.position.x,
-                                         self.set_goal_msg.pose.position.y]), pose2d_msg_in_refmap)
-            goal_xy_in_minimap = np.squeeze(apply_tf(goal_xy_in_refmap[None, :], pose2d_refmap_in_minimap))
-            goal_ij_in_minimap = np.squeeze(self.minimap2d.xy_to_ij(goal_xy_in_minimap[None, :], clip_if_outside=True))
+        if self.goal_xy_in_refmap is not None:
+            goal_xy_in_minimap = np.squeeze(apply_tf(self.goal_xy_in_refmap[None, :],
+                                                     pose2d_refmap_in_minimap))
+            goal_ij_in_minimap = np.squeeze(self.minimap2d.xy_to_ij(goal_xy_in_minimap[None, :],
+                                                                    clip_if_outside=True))
             gc = goal_ij_in_minimap
             from pyniel.numpy_tools.circular_index import make_circular_index
             reli, relj = make_circular_index(2)
