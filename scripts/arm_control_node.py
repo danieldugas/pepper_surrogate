@@ -488,10 +488,23 @@ class VirtualArm:
 
 
 class ArmControlNode:
-    # state machine:
-    # idle
-    # moving arms to zero -> awaiting user ready -> initialize virtual arm
-    # track virtual arm
+    """
+    state machine:
+        idle - arms down
+        zero (oculus tracking only) - arms up, continuously initializes virtual arm
+        tracking - arms at latest position
+        tracking active - arms follow user movements
+
+    oculus:
+        idle -> zero -> tracking active <-> tracking
+          ^---------------------'---------------'
+
+    vicon:
+        idle -> tracking active <-> tracking
+          ^----------------------------'
+
+    moving arms to zero -> awaiting user ready -> initialize virtual arm
+    """
     def __init__(self):
         rospy.init_node("arm_control_node")
 
@@ -503,8 +516,6 @@ class ArmControlNode:
         # variables
         self.virtual_arms = {"right": None, "left": None}
         self.current_state = "idle"
-        if self.vicon_tracking:
-            self.current_state = "tracking"
 
         # publishers
         self.joint_angles_pub = rospy.Publisher("/pepper_robot/pose/joint_angles",
@@ -517,8 +528,7 @@ class ArmControlNode:
 
         # Subscribers
         rospy.Subscriber("/oculus/button_a_toggle", ButtonToggle, self.deadmanswitch_toggle_callback)
-        if not self.vicon_tracking:
-            rospy.Subscriber("/oculus/button_b_toggle", ButtonToggle, self.zeroswitch_toggle_callback)
+        rospy.Subscriber("/oculus/button_b_toggle", ButtonToggle, self.zeroswitch_toggle_callback)
         rospy.Subscriber("/oculus/left_gripper", Float32, self.left_gripperswitch_toggle_callback)
         rospy.Subscriber("/oculus/right_gripper", Float32, self.right_gripperswitch_toggle_callback)
 
@@ -645,49 +655,56 @@ class ArmControlNode:
 
         # for each hand
         for side in ["right", "left"]:
-            # get tfs of tracking markers (oculus controllers or vicon)
-            if self.current_state in ["tracking", "trackingactive", "zero"]:
-                if self.vicon_tracking:
-                    if self.virtual_arms[side] is None:
-                        self.virtual_arms[side] = VirtualArm(side=side)
-                    armband_frame = kRightViconArmbandFrame if side == "right" else kLeftViconArmbandFrame
-                    wristband_frame = (kRightViconWristbandFrame if side == "right"
-                                       else kLeftViconWristbandFrame)
-                    torso_frame = kViconTorsoFrame
-                    se3_armband_in_vicon = self.get_latest_tf(kViconFrame, armband_frame)
-                    se3_wristband_in_vicon = self.get_latest_tf(kViconFrame, wristband_frame)
-                    se3_torso_in_vicon = self.get_latest_tf(kViconFrame, torso_frame)
-                    if se3_armband_in_vicon is None or se3_wristband_in_vicon is None:
-                        rospy.logwarn_throttle(2, side + " arm vicon marker transforms not found")
-                        continue
-                    if se3_torso_in_vicon is None or self.vicon_calib.se3_left_shoulder_in_torso is None:
-                        se3_torso_in_vicon = self.infer_torso_frame()
-                else:
-                    controller_frame = kRightControllerFrame if side == "right" else kLeftControllerFrame
-                    se3_controller_in_vrroom = self.get_latest_tf(kVRRoomFrame, controller_frame)
-                    if se3_controller_in_vrroom is None:
-                        return
+            if self.vicon_tracking:
+                # get tfs of tracking markers (oculus controllers or vicon)
+                if self.virtual_arms[side] is None:
+                    self.virtual_arms[side] = VirtualArm(side=side)
+                armband_frame = kRightViconArmbandFrame if side == "right" else kLeftViconArmbandFrame
+                wristband_frame = (kRightViconWristbandFrame if side == "right"
+                                   else kLeftViconWristbandFrame)
+                torso_frame = kViconTorsoFrame
+                se3_armband_in_vicon = self.get_latest_tf(kViconFrame, armband_frame)
+                se3_wristband_in_vicon = self.get_latest_tf(kViconFrame, wristband_frame)
+                se3_torso_in_vicon = self.get_latest_tf(kViconFrame, torso_frame)
+                if se3_armband_in_vicon is None or se3_wristband_in_vicon is None:
+                    rospy.logwarn_throttle(2, side + " arm vicon marker transforms not found")
+                    continue
+                if se3_torso_in_vicon is None or self.vicon_calib.se3_left_shoulder_in_torso is None:
+                    se3_torso_in_vicon = self.infer_torso_frame()
 
-            # update virtual arm angles
-            if self.current_state in ["tracking", "trackingactive"]:
-                # sometimes one arm did not get zeroed (controller not tracked). Tolerated for debug reasons
-                if self.virtual_arms[side] is not None:
-                    if self.vicon_tracking:
-                        self.virtual_arms[side].vicon_update(se3_armband_in_vicon, se3_wristband_in_vicon,
-                                                             se3_torso_in_vicon, self.vicon_calib,
-                                                             self.tf_br
-                                                             )
+                # update virtual arm angles
+                self.virtual_arms[side].vicon_update(se3_armband_in_vicon, se3_wristband_in_vicon,
+                                                     se3_torso_in_vicon, self.vicon_calib,
+                                                     self.tf_br
+                                                     )
+                self.virtual_arms[side].visualize(self.tf_br)
+            else:
+                # get tfs of tracking markers (oculus controllers or vicon)
+                controller_frame = kRightControllerFrame if side == "right" else kLeftControllerFrame
+                se3_controller_in_vrroom = self.get_latest_tf(kVRRoomFrame, controller_frame)
+                if se3_controller_in_vrroom is None:
+                    rospy.logwarn_throttle(2, side + " controller transforms not found")
+                    continue
+
+                # update virtual arm angles
+                if self.current_state in ["tracking", "trackingactive"]:
+                    # sometimes one arm did not get zeroed (controller not tracked).
+                    # Tolerated for debug reasons
+                    if self.virtual_arms[side] is None:
+                        rospy.logwarn_throttle(2, side + " arm is not initialized. \
+                                               Please switch to zero pose.")
                     else:
                         self.virtual_arms[side].update(se3_controller_in_vrroom)
-                    self.virtual_arms[side].visualize(self.tf_br)
+                        self.virtual_arms[side].visualize(self.tf_br)
 
-            if self.current_state == "zero":
-                # create new temporary virtual arm and display it
-                # when confirm button is pressed the temporary arm will become permanent and joints unlocked
-                self.virtual_arms[side] = VirtualArm(side=side)
-                self.virtual_arms[side].initialize_from_zero_pose_forward_kinematics(
-                    se3_controller_in_vrroom, self.tf_br)
-                self.virtual_arms[side].visualize(self.tf_br)
+                if self.current_state == "zero":
+                    # create new temporary virtual arm and display it
+                    # when confirm button is pressed,
+                    # the temporary arm will become permanent and joints unlocked
+                    self.virtual_arms[side] = VirtualArm(side=side)
+                    self.virtual_arms[side].initialize_from_zero_pose_forward_kinematics(
+                        se3_controller_in_vrroom, self.tf_br)
+                    self.virtual_arms[side].visualize(self.tf_br)
 
     def arm_control_routine(self, event=None):
         # get both virtual arms joint angles, publish them
@@ -735,10 +752,10 @@ class ArmControlNode:
     def zeroswitch_toggle_callback(self, msg):
         if msg.event == ButtonToggle.PRESSED:
             print("Switching from ", self.current_state)
-            if self.current_state in ["idle", "tracking", "trackingactive"]:
-                self.current_state = "zero"
-            elif self.current_state == "zero":
+            if self.current_state in ["zero", "tracking", "trackingactive"]:
                 self.current_state = "idle"
+            elif self.current_state == "idle":
+                self.current_state = "zero"
             print("to ", self.current_state)
         else:
             pass
