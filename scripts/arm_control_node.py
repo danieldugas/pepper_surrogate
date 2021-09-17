@@ -536,6 +536,9 @@ class ArmControlNode:
         rospy.Timer(rospy.Duration(0.01), self.arm_update_routine)
         rospy.Timer(rospy.Duration(0.1), self.arm_control_routine)
 
+        # Shutdown hook
+        rospy.on_shutdown(self.on_exit_arm_reset)
+
     def is_zero_pose_reached(self):
         return True
 
@@ -787,6 +790,22 @@ class ArmControlNode:
                 print("Switching from ", self.current_state)
                 self.current_state = "tracking"
                 print("to ", self.current_state)
+
+    def on_exit_arm_reset(self):
+        self.current_state = "idle"
+        joint_names = []
+        joint_angles = []
+        joint_names.extend(left_arm_rest_pose.keys())
+        joint_angles.extend(left_arm_rest_pose.values())
+        joint_names.extend(right_arm_rest_pose.keys())
+        joint_angles.extend(right_arm_rest_pose.values())
+        joint_angles_msg = JointAnglesWithSpeed()
+        joint_angles_msg.speed = kMaxArmSpeedRadPerSec
+        joint_angles_msg.joint_names = joint_names
+        joint_angles_msg.joint_angles = joint_angles
+        rospy.loginfo("Publishing rest pose before exiting.")
+        self.joint_angles_pub.publish(joint_angles_msg)
+        rospy.sleep(0.1)
 
 
 if __name__ == "__main__":
