@@ -32,3 +32,9 @@ ssh nao@10.42.0.84
 wopepper
 export ROS_MASTER_URI=http://pepper-laptop:11311
 mon launch pepper_surrogate oculus_surrogate.launch
+
+# -- vicon --
+# on bigboy new terminal
+wopepper
+export ROS_MASTER_URI=http://pepper-laptop:11311
+mon launch vicon_bridge vicon.launch
