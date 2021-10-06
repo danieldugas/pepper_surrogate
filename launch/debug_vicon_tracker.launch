@@ -17,9 +17,11 @@
   <node pkg="rosbag" type="play" name="player" output="screen" args="-r 0.2 -l -s 10 --clock $(find pepper_surrogate)/rosbags/vicon_both_arms_test_corrected.bag"/>
 
 <!--   Arm control -->
-  <node pkg="pepper_surrogate" type="arm_control_node.py" name="vicon_tracker_node">
+  <node pkg="pepper_surrogate" type="arm_control_node.py" name="arm_control_node">
     <param name="vicon_tracking" value="true"/>
   </node>
+
+  <node pkg="rqt_multiplot" type="rqt_multiplot" name="rqt_multiplot" args="--multiplot-config ~/Code/pepper_ws/src/pepper_surrogate/vicon_arm_control_node_multiplot.xml" />
 
   <node type="rviz" name="rviz" pkg="rviz" args="-d $(env HOME)/.rviz/oculus_surrogate.rviz" />
 </launch>

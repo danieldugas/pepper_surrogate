@@ -5,7 +5,7 @@ import numpy as np
 import tf2_ros
 import tf.transformations as se3
 
-from pepper_surrogate.msg import ButtonToggle
+from pepper_surrogate.msg import ButtonToggle, ACNDebugData
 from std_msgs.msg import Float32
 from naoqi_bridge_msgs.msg import JointAnglesWithSpeed
 from geometry_msgs.msg import TransformStamped
@@ -135,6 +135,7 @@ class VirtualArm:
         self.se3_virtual_torso_in_vrroom = None
         self.joint_angles = None
         self.gripper_open = None
+        self.debug_data = None
         # constants
         self.joint_names = pk.right_arm_tags if side == "right" else pk.left_arm_tags
         self.gripper_name = "RHand" if side == "right" else "LHand"
@@ -206,6 +207,8 @@ class VirtualArm:
         ew = w - e
         se = e - s
         elbow_roll = np.arccos(np.dot(ew, se) / (np.linalg.norm(ew) * np.linalg.norm(se)))
+        if self.side == "left":
+            elbow_roll = -elbow_roll
         # calculate shoulder roll
         s_T_v = se3.inverse_matrix(v_T_s)
         s_T_e = np.dot(s_T_v, v_T_e)
@@ -216,24 +219,37 @@ class VirtualArm:
             shoulder_roll = np.pi / 2. - np.arccos(-x / np.sqrt(x*x + y*y + z*z))
         # calculate shoulder pitch
         shoulder_pitch = 0
-        if np.abs(shoulder_roll) < np.deg2rad(85):
+        shoulder_singularity = np.abs(shoulder_roll) >= np.deg2rad(85)
+        if not shoulder_singularity:
             shoulder_pitch = -np.arctan2(z, y)
-        else:
+        else: # singularity: elbow aligned with soulder, any shoulder pitch is possible
             if self.joint_angles is not None:
-                SHLDR_ANG_INDX = 0
-                shoulder_pitch = self.joint_angles[SHLDR_ANG_INDX]
+                SHLDR_PTCH_INDX = 0
+                shoulder_pitch = self.joint_angles[SHLDR_PTCH_INDX]
+            # apply angle limits since singularity allows any value
+            if self.side == "right":
+                shoulder_pitch_limits = [pk.get_right_arm_min_angles()[SHLDR_PTCH_INDX],
+                                         pk.get_right_arm_max_angles()[SHLDR_PTCH_INDX]]
+            else:
+                shoulder_pitch_limits = [pk.get_left_arm_min_angles()[SHLDR_PTCH_INDX],
+                                         pk.get_left_arm_max_angles()[SHLDR_PTCH_INDX]]
+            shoulder_pitch = np.clip(shoulder_pitch, shoulder_pitch_limits[0], shoulder_pitch_limits[1])
         # forward kinematics to get pepper arm orientation from shoulder
-        x_angle = -shoulder_pitch+np.pi/2.
-        s_T_sb = se3_from_pos_rot3(np.array([0,0,0]), se3.euler_matrix(x_angle, 0, 0)[:3, :3])
-        if self.side == "right":
-            y_angle = np.pi/2.+shoulder_roll
-            sb_T_ao = se3_from_pos_rot3(np.array([0,0,0]), se3.euler_matrix(0, y_angle, 0)[:3, :3])
-            ao_T_a = se3_from_pos_rot3(np.array([0.1,0,0]), se3.euler_matrix(0, 0, 0)[:3, :3])
-        else:
-            y_angle = -np.pi/2.+shoulder_roll
-            sb_T_ao = se3_from_pos_rot3(np.array([0,0,0]), se3.euler_matrix(0, y_angle, 0)[:3, :3])
-            ao_T_a = se3_from_pos_rot3(np.array([-0.1,0,0]), se3.euler_matrix(0, 0, 0)[:3, :3])
-        s_T_a = np.dot(np.dot(s_T_sb, sb_T_ao), ao_T_a)
+        def fk_arm_in_shoulder(shoulder_pitch, shoulder_roll, side):
+            """ sb: shoulder ball, ao: arm oriented, a: arm """
+            x_angle = -shoulder_pitch+np.pi/2.
+            s_T_sb = se3_from_pos_rot3(np.array([0,0,0]), se3.euler_matrix(x_angle, 0, 0)[:3, :3])
+            if side == "right":
+                y_angle = np.pi/2.+shoulder_roll
+                sb_T_ao = se3_from_pos_rot3(np.array([0,0,0]), se3.euler_matrix(0, y_angle, 0)[:3, :3])
+                ao_T_a = se3_from_pos_rot3(np.array([0.1,0,0]), se3.euler_matrix(0, 0, 0)[:3, :3])
+            else:
+                y_angle = -np.pi/2.+shoulder_roll
+                sb_T_ao = se3_from_pos_rot3(np.array([0,0,0]), se3.euler_matrix(0, y_angle, 0)[:3, :3])
+                ao_T_a = se3_from_pos_rot3(np.array([-0.1,0,0]), se3.euler_matrix(0, 0, 0)[:3, :3])
+            s_T_a = np.dot(np.dot(s_T_sb, sb_T_ao), ao_T_a)
+            return s_T_a, s_T_sb
+        s_T_a, s_T_sb = fk_arm_in_shoulder(shoulder_pitch, shoulder_roll, self.side)
         v_T_a = np.dot(v_T_s, s_T_a)
         a_T_v = se3.inverse_matrix(v_T_a)
         # calculate elbow yaw
@@ -244,29 +260,46 @@ class VirtualArm:
             a_e = se3.translation_from_matrix(a_T_e)
             x, y, z = a_w - a_e
             elbow_yaw = 0
-            if np.abs(elbow_roll) > np.deg2rad(5):
+            elbow_singularity = np.abs(elbow_roll) <= np.deg2rad(5)
+            # detect singularity around shoulder axis
+            if not elbow_singularity:
                 if self.side == "right":
-                    elbow_yaw = np.arctan2(y, -z)
+                    elbow_yaw = np.arctan2(z, y)
                 else:
-                    elbow_yaw = np.arctan2(y, z)
-            else:
+                    elbow_yaw = np.arctan2(-z, y)
+            else: # wrist aligned with elbow
                 if self.joint_angles is not None:
-                    ELBW_ANG_INDX = 2
-                    elbow_yaw = self.joint_angles[ELBW_ANG_INDX]
+                    ELBW_YAW_INDX = 2
+                    elbow_yaw = self.joint_angles[ELBW_YAW_INDX]
+                # if the shoulder is singular, and elbow exceeds limits,
+                # spin shoulder until elbow is within limits again
+                if shoulder_singularity:
+                    ELBW_YAW_INDX = 2
+                    if self.side == "right":
+                        elbow_yaw_limits = [pk.get_right_arm_min_angles()[ELBW_YAW_INDX],
+                                            pk.get_right_arm_max_angles()[ELBW_YAW_INDX]]
+                    else:
+                        elbow_yaw_limits = [pk.get_left_arm_min_angles()[ELBW_YAW_INDX],
+                                            pk.get_left_arm_max_angles()[ELBW_YAW_INDX]]
+                    new_elbow_yaw = np.clip(elbow_yaw, elbow_yaw_limits[0], elbow_yaw_limits[1])
+                    elbow_yaw_correction = new_elbow_yaw - elbow_yaw
+                    if self.side == "right": # on the right side, shoulder pitch and elbow_yaw are opposed
+                        shoulder_pitch += elbow_yaw_correction
+                    else:
+                        shoulder_pitch -= elbow_yaw_correction
+                    elbow_yaw = new_elbow_yaw
+                    # recalculate arm with modified shoulder pitch
+                    s_T_a, s_T_sb = fk_arm_in_shoulder(shoulder_pitch, shoulder_roll, self.side)
+                    v_T_a = np.dot(v_T_s, s_T_a)
         else: # elbow yaw from calibrated armband orientation (v_T_ab points toward elbow rotation plane)
             a_T_ab = np.dot(a_T_v, v_T_ab)
             elbow_yaw = se3.euler_from_matrix(a_T_ab)[0]
         # try to map human wrist yaw to pepper wrist yaw
         # get armband (desired) in virtual wrist (after ik) frame
-        WRST_ANG_IDX = 4
         if self.side == "right":
             arm_get_position = pk.right_arm_get_position
-            yaw_limits = [pk.get_right_arm_min_angles()[WRST_ANG_IDX],
-                          pk.get_right_arm_max_angles()[WRST_ANG_IDX]]
         else:
             arm_get_position = pk.left_arm_get_position
-            yaw_limits = [pk.get_left_arm_min_angles()[WRST_ANG_IDX],
-                          pk.get_left_arm_max_angles()[WRST_ANG_IDX]]
         self.joint_angles = [shoulder_pitch, shoulder_roll, elbow_yaw, elbow_roll, 0]
         # get wrist yaw (forward kinematics to wrist)
         # x is the distal direction in the wrist and virtual_claw tf
@@ -307,8 +340,49 @@ class VirtualArm:
             se3_vrhand_in_virtual_torso
         )
         wrist_yaw, _, _ = se3.euler_from_matrix(se3_vrhand_in_virtual_forearm)
-        wrist_yaw = np.clip(wrist_yaw, yaw_limits[0], yaw_limits[1])
+        # if the elbow is singular, and wrist exceeds limits, spin elbow until wrist is within limits again
+        if elbow_singularity:
+            WRST_ANG_IDX = 4
+            if self.side == "right":
+                yaw_limits = [pk.get_right_arm_min_angles()[WRST_ANG_IDX],
+                              pk.get_right_arm_max_angles()[WRST_ANG_IDX]]
+            else:
+                arm_get_position = pk.left_arm_get_position
+                yaw_limits = [pk.get_left_arm_min_angles()[WRST_ANG_IDX],
+                              pk.get_left_arm_max_angles()[WRST_ANG_IDX]]
+            new_wrist_yaw = np.clip(wrist_yaw, yaw_limits[0], yaw_limits[1])
+            wrist_yaw_correction = new_wrist_yaw - wrist_yaw
+            elbow_yaw -= wrist_yaw_correction
+            wrist_yaw = new_wrist_yaw
         self.joint_angles = [shoulder_pitch, shoulder_roll, elbow_yaw, elbow_roll, wrist_yaw]
+        # publish debug data
+        if self.side == "right":
+            joint_limits = np.array([pk.get_right_arm_min_angles(self.joint_angles),
+                                     pk.get_right_arm_max_angles(self.joint_angles)])
+        else:
+            joint_limits = np.array([pk.get_left_arm_min_angles(self.joint_angles),
+                                     pk.get_left_arm_max_angles(self.joint_angles)])
+        self.debug_data = {
+            "time":                  rospy.Time.now(),
+            "shoulder_pitch":        shoulder_pitch,
+            "shoulder_roll":         shoulder_roll,
+            "elbow_yaw":             elbow_yaw,
+            "elbow_roll":            elbow_roll,
+            "wrist_yaw":             wrist_yaw,
+            "min_shoulder_pitch":    joint_limits[0, 0],
+            "min_shoulder_roll":     joint_limits[0, 1],
+            "min_elbow_yaw":         joint_limits[0, 2],
+            "min_elbow_roll":        joint_limits[0, 3],
+            "min_wrist_yaw":         joint_limits[0, 4],
+            "max_shoulder_pitch":    joint_limits[1, 0],
+            "max_shoulder_roll":     joint_limits[1, 1],
+            "max_elbow_yaw":         joint_limits[1, 2],
+            "max_elbow_roll":        joint_limits[1, 3],
+            "max_wrist_yaw":         joint_limits[1, 4],
+            "shoulder_singularity":  float(shoulder_singularity),
+            "elbow_singularity":     float(elbow_singularity),
+            "torso_in_vicon":        se3.translation_from_matrix(v_T_vt),
+        }
         # publish tfs for joints used in vicon calculations
         # at the end, we publish a static tf for vrroom in vicon, which allows showing the virtual arms
         v_T_vr = VRROOM_IN_VICON
@@ -520,6 +594,8 @@ class ArmControlNode:
         # publishers
         self.joint_angles_pub = rospy.Publisher("/pepper_robot/pose/joint_angles",
                                                 JointAnglesWithSpeed, queue_size=1)
+        self.debug_data_pub = rospy.Publisher("/arm_control_node/debug_data",
+                                              ACNDebugData, queue_size=1)
         self.tf_br = tf2_ros.TransformBroadcaster()
 
         # tf listener
@@ -708,6 +784,35 @@ class ArmControlNode:
                     self.virtual_arms[side].initialize_from_zero_pose_forward_kinematics(
                         se3_controller_in_vrroom, self.tf_br)
                     self.virtual_arms[side].visualize(self.tf_br)
+
+        self.publish_debug_data()
+
+    def publish_debug_data(self):
+        if self.vicon_tracking:
+            debug_data_msg = ACNDebugData()
+            debug_data_msg.header.stamp = rospy.Time.now()
+            keys = []
+            values = []
+            torsos = {"right": None, "left": None}
+            for side in ["right", "left"]:
+                if self.virtual_arms[side] is None:
+                    continue
+                D = self.virtual_arms[side].debug_data
+                if D is None:
+                    continue
+                for key in D:
+                    value = D[key]
+                    if isinstance(value, float):
+                        keys.append("{}_{}".format(side, key))
+                        values.append(value)
+                torsos[side] = D["torso_in_vicon"]
+            if torsos["right"] is not None and torsos["left"] is not None:
+                torso_dist = np.linalg.norm(torsos["right"] - torsos["left"])
+                keys.append("torsos_dist")
+                values.append(torso_dist)
+            for key, value in zip(keys, values):
+                setattr(debug_data_msg, key, value)
+            self.debug_data_pub.publish(debug_data_msg)
 
     def arm_control_routine(self, event=None):
         # get both virtual arms joint angles, publish them

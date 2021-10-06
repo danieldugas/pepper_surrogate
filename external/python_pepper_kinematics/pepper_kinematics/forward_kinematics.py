@@ -41,36 +41,41 @@ def calc_fk_and_jacob(angles, jacob=True, right=True, scale=1., full_pos=False):
     _L1_ = -L1 if right else L1
     _L2_ = -L2 if right else L2
 
-    T1 = transY(-angles[0], 0, _L1_, 0)
-    T2 = transZ(angles[1], 0, 0, 0)
-    Td = transY(9.0/180.0*math.pi, L3, _L2_, 0)
-    T3 = transX(angles[2], 0, 0, 0)
-    T4 = transZ(angles[3], 0, 0, 0)
-    T5 = transX(angles[4], L5, 0, 0)
-    T6 = transZ(0, L6, 0, -L7)
-    
-    T1Abs = T1
-    T2Abs = T1Abs.dot(T2)
-    TdAbs = T2Abs.dot(Td)
-    T3Abs = TdAbs.dot(T3)
-    T4Abs = T3Abs.dot(T4)
-    T5Abs = T4Abs.dot(T5)
-    T6Abs = T5Abs.dot(T6)
+    # s: shoulder (z rotated away from torso)
+    t_T_s = transY(-angles[0], 0, _L1_, 0)
 
-    pos = T6Abs.dot(p)[:3]
-    ori = T6Abs[0:3,0:3]
+    # as: arm (shoulder end / bicep), ae: arm (elbow end), e: elbow,
+    # fn: forearm but wrong orientation in left arm, f: forearm, w: wrist, h: hand
+    s_T_as = transZ(angles[1], 0, 0, 0)
+    as_T_ae = transY(9.0/180.0*math.pi, L3, _L2_, 0)
+    ae_T_e = transX(angles[2]+math.pi/2., 0, 0, 0)
+    e_T_fn = transZ(angles[3] if right else -angles[3], 0, 0, 0)
+    fn_T_f = transX(0 if right else math.pi, 0, 0, 0)
+    f_T_w = transX(angles[4], L5, 0, 0)
+    w_T_h = transZ(0, L6, 0, -L7)
+
+    t_T_as = t_T_s.dot(s_T_as)
+    t_T_ae = t_T_as.dot(as_T_ae)
+    t_T_e = t_T_ae.dot(ae_T_e)
+    t_T_fn = t_T_e.dot(e_T_fn)
+    t_T_f = t_T_fn.dot(fn_T_f)
+    t_T_w = t_T_f.dot(f_T_w)
+    t_T_h = t_T_w.dot(w_T_h)
+
+    pos = t_T_h.dot(p)[:3]
+    ori = t_T_h[0:3,0:3]
 
     if full_pos:
-        pos = [T.dot(p) for T in [T1Abs, T2Abs, T3Abs, T4Abs, T5Abs, T6Abs]]
-        ori = [T[0:3,0:3] for T in [T1Abs, T2Abs, T3Abs, T4Abs, T5Abs, T6Abs]]
+        pos = [T.dot(p) for T in [t_T_s, t_T_as, t_T_e, t_T_f, t_T_w, t_T_h]]
+        ori = [T[0:3,0:3] for T in [t_T_s, t_T_as, t_T_e, t_T_f, t_T_w, t_T_h]]
 
     if not jacob:
         return pos, ori
 
-    OfstT1 = _L1_ * T1Abs.dot(v1)
-    OfstTd = TdAbs.dot(np.array([[L3], [_L2_], [0], [0]]))
-    OfstT5 = L5 * T5Abs.dot(v0)
-    OfstT6 = T5Abs.dot(np.array([[L6], [0], [-L7], [0]]))
+    OfstT1 = _L1_ * t_T_s.dot(v1)
+    OfstTd = t_T_ae.dot(np.array([[L3], [_L2_], [0], [0]]))
+    OfstT5 = L5 * t_T_w.dot(v0)
+    OfstT6 = t_T_w.dot(np.array([[L6], [0], [-L7], [0]]))
 
     vec6 = OfstT6
     vec5 = vec6 + OfstT5
@@ -79,20 +84,20 @@ def calc_fk_and_jacob(angles, jacob=True, right=True, scale=1., full_pos=False):
     vecd = vec3 + OfstTd
     vec2 = vecd
     vec1 = vec2 + OfstT1
-    
-    j1 = T1Abs.dot(v1)
-    j2 = T2Abs.dot(v2)
-    jd = TdAbs.dot(v1)
-    j3 = T3Abs.dot(v0)
-    j4 = T4Abs.dot(v2)
-    j5 = T5Abs.dot(v0)
-    
+
+    j1 = t_T_s.dot(v1)
+    j2 = t_T_as.dot(v2)
+    jd = t_T_ae.dot(v1)
+    j3 = t_T_e.dot(v0)
+    j4 = t_T_f.dot(v2)
+    j5 = t_T_w.dot(v0)
+
     J1 = cross(j1, vec1)
     J2 = cross(j2, vec2)
     J3 = cross(j3, vec3)
     J4 = cross(j4, vec4)
     J5 = cross(j5, vec5)
-    
+
     J = np.c_[J1, J2, J3, J4, J5]
     return pos, ori, J
 
@@ -102,4 +107,4 @@ def cross(j, v):
     t1 = j[2][0] * v[0][0] - j[0][0] * v[2][0]
     t2 = j[0][0] * v[1][0] - j[1][0] * v[0][0]
     return np.array([[t0], [t1], [t2]])
-        
+

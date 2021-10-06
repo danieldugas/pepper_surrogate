@@ -17,6 +17,7 @@ class ViconCalibrationResult(object):
 
 def load_vicon_calibration(file):
     vicon_calib = ViconCalibrationResult()
+    print("WARNING: vicon calibration is not implemented yet. Providing default values.")
     # TODO
     # ...
     return vicon_calib
