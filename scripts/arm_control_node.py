@@ -264,9 +264,9 @@ class VirtualArm:
             # detect singularity around shoulder axis
             if not elbow_singularity:
                 if self.side == "right":
-                    elbow_yaw = np.arctan2(z, y)
+                    elbow_yaw = np.arctan2(y, -z)
                 else:
-                    elbow_yaw = np.arctan2(-z, y)
+                    elbow_yaw = np.arctan2(-y, -z)
             else: # wrist aligned with elbow
                 if self.joint_angles is not None:
                     ELBW_YAW_INDX = 2
@@ -682,6 +682,8 @@ class ArmControlNode:
         the two shoulder positions, and gravity / head placement """
         se3_left_armband_in_vicon = self.get_latest_tf(kViconFrame, kLeftViconArmbandFrame)
         se3_right_armband_in_vicon = self.get_latest_tf(kViconFrame, kRightViconArmbandFrame)
+        if se3_left_armband_in_vicon is None or se3_right_armband_in_vicon is None:
+            return None
         # get shoulder positions vicon->armband->shoulder - FO means false orientation
         se3_left_shoulder_FO_in_vicon = np.dot(
             se3_left_armband_in_vicon, self.vicon_calib.se3_left_shoulder_in_left_armband)
@@ -750,6 +752,8 @@ class ArmControlNode:
                     continue
                 if se3_torso_in_vicon is None or self.vicon_calib.se3_left_shoulder_in_torso is None:
                     se3_torso_in_vicon = self.infer_torso_frame()
+                    if se3_torso_in_vicon is None:
+                        continue
 
                 # update virtual arm angles
                 self.virtual_arms[side].vicon_update(se3_armband_in_vicon, se3_wristband_in_vicon,
@@ -821,8 +825,9 @@ class ArmControlNode:
             joint_angles = []
             for side in ["right", "left"]:
                 if self.virtual_arms[side] is not None:
-                    joint_names.extend(self.virtual_arms[side].joint_names)
-                    joint_angles.extend(self.virtual_arms[side].joint_angles)
+                    if self.virtual_arms[side].joint_angles is not None:
+                        joint_names.extend(self.virtual_arms[side].joint_names)
+                        joint_angles.extend(self.virtual_arms[side].joint_angles)
                     if self.virtual_arms[side].gripper_open is not None:
                         joint_names.append(self.virtual_arms[side].gripper_name)
                         joint_angles.append(self.virtual_arms[side].gripper_open)

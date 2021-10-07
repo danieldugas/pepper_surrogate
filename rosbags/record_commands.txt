@@ -1,0 +1,2 @@
+# everything but images (for testing arm control node)
+rosbag record -a -x "(.*)corresponding_depth|(.*)image(.*)|(.*)points|(.*)camera(.*)|(.*)stereo(.*)|(.*)minimap(.*)"

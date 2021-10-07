@@ -48,7 +48,7 @@ def calc_fk_and_jacob(angles, jacob=True, right=True, scale=1., full_pos=False):
     # fn: forearm but wrong orientation in left arm, f: forearm, w: wrist, h: hand
     s_T_as = transZ(angles[1], 0, 0, 0)
     as_T_ae = transY(9.0/180.0*math.pi, L3, _L2_, 0)
-    ae_T_e = transX(angles[2]+math.pi/2., 0, 0, 0)
+    ae_T_e = transX(angles[2] if right else angles[2]+math.pi, 0, 0, 0)
     e_T_fn = transZ(angles[3] if right else -angles[3], 0, 0, 0)
     fn_T_f = transX(0 if right else math.pi, 0, 0, 0)
     f_T_w = transX(angles[4], L5, 0, 0)
