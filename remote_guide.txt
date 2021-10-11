@@ -37,4 +37,4 @@ mon launch pepper_surrogate oculus_surrogate.launch
 # on bigboy new terminal
 wopepper
 export ROS_MASTER_URI=http://pepper-laptop:11311
-mon launch vicon_bridge vicon.launch
+mon launch vicon_bridge vicon.launch datastream_hostport:=10.10.10.5:801
