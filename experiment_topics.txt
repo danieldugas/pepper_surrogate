@@ -102,3 +102,7 @@ rosbag record \
 /vicon/vicon_left_wristband/vicon_left_wristband \
 /vicon/vicon_right_armband/vicon_right_armband \
 /vicon/vicon_right_wristband/vicon_right_wristband \
+/pepper_audio/audio \
+/pepper_audio/audio_info \
+/pilot_audio/audio \
+/pilot_audio/audio_info \
