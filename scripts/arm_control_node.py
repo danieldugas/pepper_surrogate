@@ -896,10 +896,11 @@ class ArmControlNode:
             else:
                 pass
         elif msg.event == ButtonToggle.RELEASED:
-            if self.current_state == "trackingactive":
-                print("Switching from ", self.current_state)
-                self.current_state = "tracking"
-                print("to ", self.current_state)
+            pass # we disabled the deadman switch because the cognitive load was too high on the pilot
+#             if self.current_state == "trackingactive":
+#                 print("Switching from ", self.current_state)
+#                 self.current_state = "tracking"
+#                 print("to ", self.current_state)
 
     def on_exit_arm_reset(self):
         self.current_state = "idle"
