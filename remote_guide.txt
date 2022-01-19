@@ -32,6 +32,7 @@ ssh pepper-laptop
 ssh nao@10.42.0.84
 # now pepper (ssh)
 # up arrow, watch -n 10 ./disable_autonomous_functions.sh
+# TODO: look into disabling BasicAwareness (last time disabled ALSpeechRecognition stopped blue eyes, but maybe due to crashing other modules?)
 
 # -- oculus surrogate --
 # on bigboy new terminal
